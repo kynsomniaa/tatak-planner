@@ -1,0 +1,20 @@
+env: load .env.local
+env: export EXPO_PUBLIC_SUPABASE_URL EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY EXPO_PUBLIC_AI_OPTIMIZER_URL
+Starting project at C:\Users\Miguel De Guzman\Documents\Codex\2026-08-14\e\outputs\cpe-pathfinder
+Starting Metro Bundler
+Waiting on http://localhost:8082
+Logs for your project will appear below.
+Web Bundled 1729ms index.ts (901 modules)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 60ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 170ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 117ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
+Web .\index.ts ░░░░░░░░░░░░░░░░  0.0% (0/1)
+Web Bundled 81ms index.ts (1 module)
+ LOG  [web] Logs will appear in the browser console
