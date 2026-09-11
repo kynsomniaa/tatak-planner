@@ -252,7 +252,7 @@ export function parseFeuCurriculumHtml(
 
 export function createWorkspaceFromCurriculum(curriculum: Curriculum): StudentWorkspace {
   return {
-    plannerModelVersion: 2,
+    plannerModelVersion: 3,
     curriculum,
     plan: Object.fromEntries(
       curriculum.courses.map((course) => [course.code, course.originalTermId]),
@@ -264,6 +264,7 @@ export function createWorkspaceFromCurriculum(curriculum: Curriculum): StudentWo
     plannedCourseCodes: [],
     plannerTermIds: [],
     customPlannerTerms: [],
+    raidNames: {},
     retakeAttempts: [],
     preferences: {
       showPrerequisiteConnectors: true,

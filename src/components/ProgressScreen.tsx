@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors, contrastText, useAppTheme } from '../theme';
 import { Course, CourseStatus, RetakeAttempt, StudentWorkspace } from '../types';
-import { dependentCourseCodes, termGwa, updateCourseBundleStatus, updateCourseGrade, updateRetakeAttempt } from '../domain/planner';
+import { dependentCourseCodes, plannerTerms, termGwa, updateCourseBundleStatus, updateCourseGrade, updateRetakeAttempt } from '../domain/planner';
 import { courseBundleCodes, visibleCurriculumCourses } from '../domain/academicSetup';
 import { CourseFilter, courseDepartment, courseFilters } from '../domain/coursePresentation';
 import { CourseDetailsModal } from './CourseDetailsModal';
@@ -36,6 +36,7 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
   const totalUnits = curriculum.courses.reduce((total, course) => total + course.units, 0);
   const selectedStatus = selectedCourse ? workspace.statuses[selectedCourse.code] ?? 'pending' : 'pending';
   const byCode = new Map(curriculum.courses.map((course) => [course.code, course]));
+  const raids = plannerTerms(workspace);
 
   const toggleYear = (year: number) => setCollapsedYears((current) => {
     const next = new Set(current);
@@ -44,12 +45,12 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
   });
 
   return (
-    <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.canvas }]}> 
+    <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.canvas }]}>
       <Text style={[styles.eyebrow, { color: theme.green700 }]}>PROGRESS & GRADES</Text>
       <Text style={[styles.title, { color: theme.ink }]}>Keep your academic record current</Text>
       <Text style={[styles.subtitle, { color: theme.muted }]}>Tap a course tile to move it through Pending, Active, and Passed. Use the info button or long-press for complete details.</Text>
 
-      <View style={[styles.progressCard, { backgroundColor: theme.green900 }]}> 
+      <View style={[styles.progressCard, { backgroundColor: theme.green900 }]}>
         <View style={styles.progressCopy}><Text style={[styles.progressValue, { color: contrastText(theme.green900) }]}>{passedUnits}</Text><Text style={[styles.progressLabel, { color: contrastText(theme.green900) }]}>of {totalUnits} units passed</Text></View>
         <Text style={[styles.progressPercent, { color: theme.gold }]}>{Math.round((passedUnits / Math.max(totalUnits, 1)) * 100)}%</Text>
         <View style={[styles.track, { backgroundColor: theme.green800 }]}><View style={[styles.fill, { width: `${(passedUnits / Math.max(totalUnits, 1)) * 100}%`, backgroundColor: theme.gold }]} /></View>
@@ -60,10 +61,10 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
         <Pressable onPress={() => setShowGrades((value) => !value)} style={[styles.gradeButton, { backgroundColor: theme.gold }]}><Text style={[styles.gradeButtonText, { color: theme.green900 }]}>{showGrades ? 'Close gradebook' : 'Enter grades'}</Text></Pressable>
       </View>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.gwaGrid}>
-        {curriculum.terms.map((term) => {
+        {raids.map((term) => {
           const gwa = termGwa(workspace, term.id);
           return (
-            <Pressable key={term.id} onPress={() => { setGradeTermId(term.id); setShowGrades(true); }} style={[styles.gwaCard, { backgroundColor: theme.surface, borderColor: gradeTermId === term.id && showGrades ? theme.green700 : theme.border }]}> 
+            <Pressable key={term.id} onPress={() => { setGradeTermId(term.id); setShowGrades(true); }} style={[styles.gwaCard, { backgroundColor: theme.surface, borderColor: gradeTermId === term.id && showGrades ? theme.green700 : theme.border }]}>
               <Text style={[styles.gwaTerm, { color: theme.muted }]}>Y{term.year} · T{term.term}</Text>
               <Text style={[styles.gwaValue, { color: theme.green700 }, gwa === null && styles.gwaEmpty]}>{gwa === null ? '—' : gwa.toFixed(2)}</Text>
             </Pressable>
@@ -74,7 +75,7 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
       {showGrades && <GradeBook workspace={workspace} onChange={onChange} termId={gradeTermId || workspace.academicProfile?.currentTermId || curriculum.terms[0]?.id} onTermChange={setGradeTermId} />}
 
       <View style={styles.filterRow}>
-        <View style={[styles.departmentTabs, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+        <View style={[styles.departmentTabs, { backgroundColor: theme.surface, borderColor: theme.border }]}>
           {courseFilters.map((item) => {
             const count = item === 'ALL' ? visible.length : visible.filter((course) => courseDepartment(course.code) === item).length;
             return <Pressable key={item} onPress={() => setDepartment(item)} style={[styles.departmentTab, department === item && { backgroundColor: theme.green900 }]}><Text style={[styles.departmentText, { color: department === item ? contrastText(theme.green900) : theme.muted }]}>{item === 'ALL' ? 'All' : item} · {count}</Text></Pressable>;
@@ -93,7 +94,7 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
         const passed = yearCourses.filter((course) => workspace.statuses[course.code] === 'passed').length;
         const collapsed = collapsedYears.has(year);
         return (
-          <View key={year} style={[styles.yearGroup, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+          <View key={year} style={[styles.yearGroup, { backgroundColor: theme.surface, borderColor: theme.border }]}>
             <Pressable onPress={() => toggleYear(year)} style={[styles.yearHeader, passed === yearCourses.length && yearCourses.length > 0 && { backgroundColor: theme.green100 }]}>
               <View><Text style={[styles.yearTitle, { color: theme.ink }]}>{passed === yearCourses.length && yearCourses.length > 0 ? '✓ ' : ''}Year {year}</Text><Text style={[styles.yearMeta, { color: theme.muted }]}>{passed} of {yearCourses.length} passed</Text></View>
               <Text style={[styles.chevron, { color: theme.green700 }]}>{collapsed ? '＋' : '−'}</Text>
@@ -102,7 +103,7 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
               const termCourses = yearCourses.filter((course) => course.originalTermId === term.id);
               if (termCourses.length === 0) return null;
               return (
-                <View key={term.id} style={[styles.termGroup, { borderTopColor: theme.border }]}> 
+                <View key={term.id} style={[styles.termGroup, { borderTopColor: theme.border }]}>
                   <Text style={[styles.termTitle, { color: theme.muted }]}>TERM {term.term}</Text>
                   <View style={styles.courseGrid}>
                     {termCourses.map((course) => (
@@ -119,7 +120,7 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
       <CourseDetailsModal
         course={selectedCourse}
         status={selectedStatus}
-        terms={curriculum.terms}
+        terms={raids}
         currentTermId={selectedCourse ? workspace.plan[selectedCourse.code] ?? selectedCourse.originalTermId : ''}
         visible={Boolean(selectedCourse)}
         onClose={() => setSelectedCourse(null)}
@@ -139,7 +140,7 @@ function ProgressTile({ course, status, onCycle, onDetails }: { course: Course; 
   const label = status === 'passed' ? '✓ PASSED' : status === 'active' ? '● ACTIVE' : status === 'retake' ? '↻ RETAKE' : 'PENDING';
   const accent = status === 'passed' || status === 'active' ? theme.green700 : status === 'retake' ? theme.danger : theme.muted;
   return (
-    <Pressable onPress={onCycle} onLongPress={onDetails} delayLongPress={420} style={({ pressed }) => [styles.progressTile, { backgroundColor: status === 'passed' || status === 'active' ? theme.green100 : theme.canvas, borderColor: accent }, pressed && styles.pressed]}> 
+    <Pressable onPress={onCycle} onLongPress={onDetails} delayLongPress={420} style={({ pressed }) => [styles.progressTile, { backgroundColor: status === 'passed' || status === 'active' ? theme.green100 : theme.canvas, borderColor: accent }, pressed && styles.pressed]}>
       <View style={styles.tileTop}><Text style={[styles.code, { color: accent }]}>{course.code}</Text><Pressable onPress={(event) => { event.stopPropagation(); onDetails(); }} style={[styles.info, { backgroundColor: theme.surface }]}><Text style={[styles.infoText, { color: theme.green700 }]}>i</Text></Pressable></View>
       <Text numberOfLines={2} style={[styles.courseTitle, { color: theme.ink }]}>{course.title}</Text>
       <Text style={[styles.statusLabel, { color: accent }]}>{label}</Text>
@@ -152,12 +153,13 @@ function GradeBook({ workspace, onChange, termId, onTermChange }: { workspace: S
   const curriculum = workspace.curriculum;
   if (!curriculum) return null;
   const byCode = new Map(curriculum.courses.map((course) => [course.code, course]));
+  const raids = plannerTerms(workspace);
   const termCourses = visibleCurriculumCourses(curriculum).filter((course) => (workspace.plan[course.code] ?? course.originalTermId) === termId);
   const attempts = (workspace.retakeAttempts ?? []).filter((attempt) => attempt.termId === termId);
   return (
-    <View style={[styles.gradeBook, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
+    <View style={[styles.gradeBook, { backgroundColor: theme.surface, borderColor: theme.border }]}>
       <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.termTabs}>
-        {curriculum.terms.map((term) => <Pressable key={term.id} onPress={() => onTermChange(term.id)} style={[styles.termTab, { backgroundColor: term.id === termId ? theme.green900 : theme.canvas }]}><Text style={[styles.termTabText, { color: term.id === termId ? contrastText(theme.green900) : theme.muted }]}>Y{term.year} · T{term.term}</Text></Pressable>)}
+        {raids.map((term) => <Pressable key={term.id} onPress={() => onTermChange(term.id)} style={[styles.termTab, { backgroundColor: term.id === termId ? theme.green900 : theme.canvas }]}><Text style={[styles.termTabText, { color: term.id === termId ? contrastText(theme.green900) : theme.muted }]}>Y{term.year} · T{term.term}</Text></Pressable>)}
       </ScrollView>
       <Text style={[styles.gradeBookTitle, { color: theme.ink }]}>Individual course grades</Text>
       <Text style={[styles.gradeBookHelp, { color: theme.muted }]}>Enter values from 0 to 100. Changes save when the field loses focus or you press Enter.</Text>
@@ -185,7 +187,7 @@ function InlineGrade({ label, title, value, onSave }: { label: string; title: st
     onSave(grade);
   };
   return (
-    <View style={[styles.gradeRow, { backgroundColor: theme.canvas, borderColor: error ? theme.danger : theme.border }]}> 
+    <View style={[styles.gradeRow, { backgroundColor: theme.canvas, borderColor: error ? theme.danger : theme.border }]}>
       <View style={styles.gradeCopy}><Text style={[styles.gradeCode, { color: theme.green700 }]}>{label}</Text><Text numberOfLines={1} style={[styles.gradeTitle, { color: theme.muted }]}>{title}</Text></View>
       <TextInput value={text} onChangeText={setText} onBlur={save} onSubmitEditing={save} keyboardType="decimal-pad" placeholder="Grade" placeholderTextColor={theme.muted} style={[styles.gradeInput, { backgroundColor: theme.surface, borderColor: error ? theme.danger : theme.border, color: theme.ink }]} />
     </View>

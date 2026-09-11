@@ -102,6 +102,7 @@ export interface StudentWorkspace {
   plannedCourseCodes?: string[];
   plannerTermIds?: string[];
   customPlannerTerms?: CurriculumTerm[];
+  raidNames?: Record<string, string>;
   retakeAttempts?: RetakeAttempt[];
   academicProfile?: AcademicProfile;
   goal?: StudentGoal;

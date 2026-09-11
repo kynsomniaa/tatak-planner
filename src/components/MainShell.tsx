@@ -2,19 +2,17 @@ import React, { useEffect, useState } from 'react';
 import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { colors, useAppTheme } from '../theme';
 import { AppSession, CourseRating, StudentWorkspace } from '../types';
-import { PlannerScreen } from './PlannerScreen';
 import { ProgressScreen } from './ProgressScreen';
 import { SettingsScreen } from './SettingsScreen';
-import { BlueprintScreen } from './BlueprintScreen';
 import { RatingsScreen } from './RatingsScreen';
 import { loadRatings } from '../services/ratings';
+import { CurriculumRaidScreen } from './CurriculumRaidScreen';
 
-type Tab = 'blueprint' | 'plan' | 'ratings' | 'progress' | 'settings';
+type Tab = 'map' | 'progress' | 'ratings' | 'settings';
 const tabs: Array<{ id: Tab; label: string; icon: string }> = [
-  { id: 'blueprint', label: 'Curriculum', icon: '▤' },
-  { id: 'plan', label: 'Plan', icon: '▦' },
-  { id: 'ratings', label: 'Ratings', icon: '★' },
+  { id: 'map', label: 'Curriculum Map', icon: '⌘' },
   { id: 'progress', label: 'Progress', icon: '✓' },
+  { id: 'ratings', label: 'Ratings', icon: '★' },
   { id: 'settings', label: 'Settings', icon: '⚙' },
 ];
 
@@ -32,8 +30,7 @@ export function MainShell({
   onSignOut: () => void;
 }) {
   const theme = useAppTheme();
-  const [tab, setTab] = useState<Tab>('plan');
-  const [boardFullScreen, setBoardFullScreen] = useState(false);
+  const [tab, setTab] = useState<Tab>('map');
   const [ratings, setRatings] = useState<CourseRating[]>([]);
   useEffect(() => {
     void loadRatings(session).then(setRatings).catch(() => setRatings([]));
@@ -41,22 +38,8 @@ export function MainShell({
   return (
     <SafeAreaView style={[styles.safe, { backgroundColor: theme.canvas }]}>
       <View style={styles.content}>
-        {tab === 'blueprint' ? (
-          <BlueprintScreen
-            workspace={workspace}
-            onChange={onChange}
-            ratings={ratings}
-            onOpenPlanner={() => setTab('plan')}
-          />
-        ) : tab === 'plan' ? (
-          <PlannerScreen
-            workspace={workspace}
-            onChange={onChange}
-            ratings={ratings}
-            fullScreen={boardFullScreen}
-            onFullScreenChange={setBoardFullScreen}
-          />
-        ) : tab === 'ratings' ? <RatingsScreen session={session} workspace={workspace} />
+        {tab === 'map' ? <CurriculumRaidScreen workspace={workspace} onChange={onChange} ratings={ratings} />
+          : tab === 'ratings' ? <RatingsScreen session={session} workspace={workspace} />
           : tab === 'progress' ? <ProgressScreen workspace={workspace} onChange={onChange} />
             : tab === 'settings' ? (
           <SettingsScreen
@@ -68,7 +51,7 @@ export function MainShell({
           />
               ) : null}
       </View>
-      {!(tab === 'plan' && boardFullScreen) && <View style={[styles.nav, { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.green900 }]}> 
+      <View style={[styles.nav, { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.green900 }]}>
         {tabs.map((item) => {
           const active = tab === item.id;
           return (
@@ -78,7 +61,7 @@ export function MainShell({
             </Pressable>
           );
         })}
-      </View>}
+      </View>
     </SafeAreaView>
   );
 }

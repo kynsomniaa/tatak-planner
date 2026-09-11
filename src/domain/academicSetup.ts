@@ -21,6 +21,28 @@ export function courseBundleCodes(curriculum: Curriculum, code: string): string[
   return root ? [root.code, ...root.linkedLaboratories] : [code];
 }
 
+function initialRaidPlan(
+  curriculum: Curriculum,
+  statuses: Record<string, import('../types').CourseStatus>,
+  currentTermId: string,
+) {
+  const currentTerm = curriculum.terms.find((term) => term.id === currentTermId) ?? curriculum.terms[0];
+  const firstTerm = [...curriculum.terms].sort((left, right) => left.order - right.order)[0];
+  const included = new Set<string>();
+  const plan: Record<string, string> = {};
+  curriculum.courses.forEach((course) => {
+    const status = statuses[course.code] ?? 'pending';
+    if (course.originalTermId === firstTerm?.id || status === 'passed' || status === 'active') included.add(course.code);
+    if (status === 'active') plan[course.code] = currentTermId;
+    else if (course.originalTermId === firstTerm?.id || status === 'passed') plan[course.code] = course.originalTermId;
+  });
+  const plannerTermIds = curriculum.terms
+    .filter((term) => term.order <= (currentTerm?.order ?? 0))
+    .sort((left, right) => left.order - right.order)
+    .map((term) => term.id);
+  return { plannedCourseCodes: [...included], plannerTermIds, plan };
+}
+
 export function inferPrerequisiteCodes(
   curriculum: Curriculum,
   currentCourseCodes: string[],
@@ -71,14 +93,16 @@ export function createWorkspaceWithAcademicSetup(
   inferred.forEach((code) => { statuses[code] = 'passed'; });
   manualBundles.forEach((code) => { statuses[code] = 'passed'; });
   currentBundles.forEach((code) => { statuses[code] = 'active'; });
+  const raids = initialRaidPlan(curriculum, statuses, term.id);
 
   return {
     ...workspace,
     statuses,
-    plannerModelVersion: 2,
-    plannedCourseCodes: [...currentBundles],
-    plannerTermIds: [term.id],
-    plan: { ...workspace.plan, ...Object.fromEntries([...currentBundles].map((code) => [code, term.id])) },
+    plannerModelVersion: 3,
+    plannedCourseCodes: raids.plannedCourseCodes,
+    plannerTermIds: raids.plannerTermIds,
+    plan: raids.plan,
+    raidNames: {},
     academicProfile: {
       startYear,
       startTerm,
@@ -110,18 +134,16 @@ export function createWorkspaceFromProgress(
     statuses[course.code] = selectedStatuses[course.code] ?? 'pending';
   }
 
-  const plannedCourseCodes = curriculum.courses
-    .filter((course) => statuses[course.code] === 'active')
-    .map((course) => course.code);
-  const plannerTermIds = [currentTermId];
+  const raids = initialRaidPlan(curriculum, statuses, currentTermId);
 
   return {
     ...workspace,
-    plannerModelVersion: 2,
+    plannerModelVersion: 3,
     statuses,
-    plan: { ...workspace.plan, ...Object.fromEntries(plannedCourseCodes.map((code) => [code, currentTermId])) },
-    plannedCourseCodes,
-    plannerTermIds,
+    plan: raids.plan,
+    plannedCourseCodes: raids.plannedCourseCodes,
+    plannerTermIds: raids.plannerTermIds,
+    raidNames: {},
     retakeAttempts: [],
     academicProfile: {
       startYear,

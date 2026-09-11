@@ -124,7 +124,7 @@ export function validatePlan(workspace: StudentWorkspace): PlanViolation[] {
       }
       if (workspace.statuses[prerequisiteCode] === 'passed') continue;
       const prerequisiteOrder = orders.get(workspace.plan[prerequisiteCode]);
-      if (prerequisiteOrder === undefined || prerequisiteOrder >= courseOrder) {
+      if (!included.has(prerequisiteCode) || prerequisiteOrder === undefined || prerequisiteOrder >= courseOrder) {
         violations.push({
           type: 'prerequisite',
           courseCode: course.code,
@@ -329,13 +329,22 @@ export function updateCourseBundleStatus(
   const codes = workspace.curriculum ? courseBundleCodes(workspace.curriculum, courseCode) : [courseCode];
   const nextPlanned = plannedCodes(workspace);
   const currentTermId = workspace.academicProfile?.currentTermId;
+  const firstTermId = workspace.curriculum?.terms.reduce((first, term) => term.order < first.order ? term : first, workspace.curriculum.terms[0])?.id;
   const nextPlan = { ...workspace.plan };
   codes.forEach((code) => {
     if (status === 'active') {
       nextPlanned.add(code);
       if (currentTermId) nextPlan[code] = currentTermId;
+    } else if (status === 'passed') {
+      nextPlanned.add(code);
+      const course = workspace.curriculum?.courses.find((candidate) => candidate.code === code);
+      if (!nextPlan[code] && course) nextPlan[code] = course.originalTermId;
+    } else if (workspace.curriculum?.courses.find((candidate) => candidate.code === code)?.originalTermId === firstTermId) {
+      nextPlanned.add(code);
+      if (firstTermId) nextPlan[code] = firstTermId;
     } else {
       nextPlanned.delete(code);
+      delete nextPlan[code];
     }
   });
   return {
@@ -408,6 +417,15 @@ export function addCourseToPlan(
   const courses = courseIndex(curriculum);
   const root = courses.get(courseCode);
   if (!root) return { ok: false, workspace, movedCodes: [], violations: [] };
+  const alreadyIncluded = plannedCodes(workspace);
+  if (courseBundleCodes(curriculum, courseCode).some((code) => alreadyIncluded.has(code))) {
+    return {
+      ok: false,
+      workspace,
+      movedCodes: [],
+      violations: [{ type: 'prerequisite', courseCode, relatedCode: courseCode, message: `${courseCode} is already assigned to a raid. Remove or move that attempt instead of duplicating it.`, blocking: true }],
+    };
+  }
   const pending = [root.code];
   const added = new Set<string>();
   while (pending.length > 0) {
@@ -418,7 +436,7 @@ export function addCourseToPlan(
     course?.linkedLaboratories.forEach((linked) => pending.push(linked));
     course?.corequisites.forEach((linked) => pending.push(linked));
   }
-  const included = plannedCodes(workspace);
+  const included = alreadyIncluded;
   added.forEach((code) => included.add(code));
   const candidate: StudentWorkspace = {
     ...workspace,

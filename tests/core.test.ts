@@ -10,6 +10,7 @@ import { orderedBoardTerms, reorderBoardColumns, resolveBoardColumnDrop, starter
 import { goalSuggestions } from '../src/domain/optimizer';
 import { academicTermLabel } from '../src/domain/academicCalendar';
 import { migratePlannerWorkspace } from '../src/domain/workspaceMigration';
+import { availableCourseCodesForRaid, buildCurriculumGraph, courseField, graphNodesOverlap } from '../src/domain/curriculumGraph';
 
 const rows = Array.from({ length: 10 }, (_, index) => {
   const code = `CPE${String(index + 1).padStart(4, '0')}`;
@@ -62,6 +63,10 @@ const curriculum: Curriculum = {
     },
     {
       code: 'GED0001', title: 'STANDALONE', units: 3, originalTermId: 'y1t1',
+      prerequisites: [], corequisites: [], linkedLaboratories: [],
+    },
+    {
+      code: 'GED0002', title: 'FUTURE STANDALONE', units: 3, originalTermId: 'y1t3',
       prerequisites: [], corequisites: [], linkedLaboratories: [],
     },
   ],
@@ -117,21 +122,21 @@ const progressWorkspace = createWorkspaceFromProgress(
   { CPE0001: 'passed', CPE0001L: 'passed', CPE0002: 'active', GED0001: 'pending' },
   {},
 );
-assert.equal(progressWorkspace.plannedCourseCodes?.includes('GED0001'), false, 'future pending courses start outside the personal plan');
-assert.deepEqual(progressWorkspace.plannedCourseCodes, ['CPE0002'], 'only active courses begin in the personal plan');
-assert.deepEqual(progressWorkspace.plannerTermIds, ['y1t2'], 'the board begins with only the current term');
+assert.equal(progressWorkspace.plannedCourseCodes?.includes('GED0002'), false, 'future pending courses start outside the raid plan');
+assert.deepEqual(progressWorkspace.plannedCourseCodes, ['CPE0001', 'CPE0001L', 'CPE0002', 'GED0001'], 'Raid 1 stays fixed while passed and active courses remain represented');
+assert.deepEqual(progressWorkspace.plannerTermIds, ['y1t1', 'y1t2'], 'raid history runs from the fixed first term through the current term');
 assert.equal(progressWorkspace.plan.CPE0002, 'y1t2', 'active courses are placed in the selected current term');
 const withNextTerm = addNextPlannerTerm(progressWorkspace);
-assert.deepEqual(withNextTerm.plannerTermIds, ['y1t2', 'y1t3'], 'future terms appear only after New term is used');
-const pooledCourse = addCourseToPlan(withNextTerm, 'GED0001', 'y1t3');
+assert.deepEqual(withNextTerm.plannerTermIds, ['y1t1', 'y1t2', 'y1t3'], 'future raids appear only after New raid is used');
+const pooledCourse = addCourseToPlan(withNextTerm, 'GED0002', 'y1t3');
 assert.equal(pooledCourse.ok, true, 'an eligible Course Pool subject can be placed into an existing planner term');
-assert.equal(pooledCourse.workspace.plan.GED0001, 'y1t3');
+assert.equal(pooledCourse.workspace.plan.GED0002, 'y1t3');
 assert.equal(academicTermLabel(curriculum.terms[2], { ...progressWorkspace.academicProfile!, startYear: 2024, startTerm: 2 }), 'SY 2025–2026 · Term 1', 'year started and starting trimester drive calendar labels');
 const migrated = migratePlannerWorkspace({ ...progressWorkspace, plannerModelVersion: undefined, plannedCourseCodes: curriculum.courses.map((course) => course.code), plannerTermIds: curriculum.terms.map((term) => term.id), retakeAttempts: [{ id: 'test', courseCode: 'CPE0001', termId: 'y1t3', status: 'pending', grades: {}, createdAt: '2026-01-01' }] });
-assert.deepEqual(migrated.plannedCourseCodes, ['CPE0002'], 'prototype planner tests are cleared while active progress is retained');
-assert.deepEqual(migrated.plannerTermIds, ['y1t2']);
-const copied = copyCoursesToPlan(progressWorkspace, ['GED0001']);
-assert.equal(copied.plannedCourseCodes?.includes('GED0001'), true, 'individual blueprint courses copy into the plan');
+assert.deepEqual(migrated.plannedCourseCodes, ['CPE0001', 'CPE0001L', 'CPE0002', 'GED0001'], 'column-board tests are cleared while fixed Raid 1 and progress are retained');
+assert.deepEqual(migrated.plannerTermIds, ['y1t1', 'y1t2']);
+const copied = copyCoursesToPlan(progressWorkspace, ['GED0002']);
+assert.equal(copied.plannedCourseCodes?.includes('GED0002'), true, 'legacy copied courses remain representable during migration');
 const withRetake = addRetakeAttempt(copied, 'CPE0001', 'y1t3');
 assert.equal(withRetake.retakeAttempts?.length, 1, 'retakes are separate attempts');
 assert.equal(withRetake.plan.CPE0001, 'y1t1', 'retake creation preserves the original attempt term');
@@ -156,6 +161,86 @@ assert.equal(actualChains[0].kind, 'prerequisite');
 assert.equal(courseDepartment('CPE0049'), 'CPE');
 assert.equal(courseDepartment('COE0013'), 'COE');
 assert.equal(courseDepartment('NSTP1'), 'GED', 'non-CPE/COE curriculum courses remain discoverable in the GED group');
+const graph = buildCurriculumGraph(chainCurriculum);
+assert.equal(graph.nodes.length, 5, 'every combined lecture/lab tile appears once in the clustered curriculum map');
+assert.equal(new Set(graph.nodes.map((node) => node.course.code)).size, graph.nodes.length, 'each course has exactly one home cluster');
+assert.equal(courseField(curriculum.courses[0]), 'cpe-core', 'each course derives a portable academic field rather than a fixed visual coordinate');
+const firstTermNodes = graph.nodes.filter((node) => node.course.originalTermId === 'y1t1');
+const laterNodes = graph.nodes.filter((node) => node.course.originalTermId !== 'y1t1');
+assert.ok(Math.max(...firstTermNodes.map((node) => node.x)) < Math.min(...laterNodes.map((node) => node.x)), 'official first-term courses occupy the leftmost starting region');
+assert.equal(graphNodesOverlap(graph.nodes), false, 'importance-aware node dimensions never overlap');
+const rectanglesOverlap = (left: { x: number; y: number; width: number; height: number }, right: { x: number; y: number; width: number; height: number }) => left.x < right.x + right.width && left.x + left.width > right.x && left.y < right.y + right.height && left.y + left.height > right.y;
+graph.fields.forEach((field) => assert.equal(graph.nodes.some((node) => rectanglesOverlap(field.labelBounds, node)), false, `${field.label} receives a course-free map-title slot`));
+graph.fields.forEach((field, index) => assert.equal(graph.fields.slice(index + 1).some((other) => rectanglesOverlap(field.labelBounds, other.labelBounds)), false, `${field.label} does not obscure another field title`));
+graph.edges.filter((edge) => edge.kind === 'prerequisite').forEach((edge) => {
+  const source = graph.nodes.find((node) => node.course.code === edge.sourceCode)!;
+  const target = graph.nodes.find((node) => node.course.code === edge.targetCode)!;
+  assert.ok(source.x + source.width < target.x, `${edge.sourceCode} remains left of ${edge.targetCode}`);
+});
+const rootNode = graph.nodes.find((node) => node.course.code === 'CPE0001')!;
+const standaloneNode = graph.nodes.find((node) => node.course.code === 'GED0002')!;
+assert.ok(rootNode.importanceScore > standaloneNode.importanceScore, 'long downstream influence contributes more importance than an isolated course');
+assert.equal(availableCourseCodesForRaid(withNextTerm, 'y1t3').has('GED0002'), true, 'the selected raid exposes strictly valid available choices');
+const stalePrerequisitePlan: StudentWorkspace = {
+  ...withNextTerm,
+  curriculum: chainCurriculum,
+  plan: { ...withNextTerm.plan, CPE0002: 'y1t2' },
+  statuses: { ...withNextTerm.statuses, CPE0002: 'pending', CPE0003: 'pending' },
+  plannedCourseCodes: (withNextTerm.plannedCourseCodes ?? []).filter((code) => code !== 'CPE0002'),
+};
+assert.equal(availableCourseCodesForRaid(stalePrerequisitePlan, 'y1t3').has('CPE0003'), false, 'stale legacy term data cannot unlock a missing prerequisite');
+
+const crossingCurriculum: Curriculum = {
+  ...curriculum,
+  id: 'alternate-layout',
+  courses: [
+    { code: 'ALT-A', title: 'PROGRAMMING FOUNDATIONS', units: 3, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
+    { code: 'ALT-B', title: 'ELECTRICAL CIRCUITS', units: 3, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
+    { code: 'ALT-C', title: 'ADVANCED PROGRAMMING', units: 3, originalTermId: 'y1t2', prerequisites: ['ALT-B'], corequisites: [], linkedLaboratories: [] },
+    { code: 'ALT-D', title: 'ADVANCED ELECTRONIC CIRCUITS', units: 3, originalTermId: 'y1t2', prerequisites: ['ALT-A'], corequisites: [], linkedLaboratories: [] },
+    { code: 'ALT-E', title: 'SYSTEMS INTEGRATION PROJECT', units: 6, originalTermId: 'y1t3', prerequisites: ['ALT-C', 'ALT-D'], corequisites: [], linkedLaboratories: [] },
+  ],
+};
+const crossingGraph = buildCurriculumGraph(crossingCurriculum);
+assert.ok(crossingGraph.diagnostics.crossingCountBefore > crossingGraph.diagnostics.crossingCountAfter, 'barycentric sweeps reduce a deterministic reducible crossing');
+assert.equal(graphNodesOverlap(crossingGraph.nodes), false, 'an alternate curriculum produces a collision-free map without course-specific coordinates');
+
+const milestoneCurriculum: Curriculum = {
+  ...curriculum,
+  id: 'milestone-layout',
+  courses: [
+    { code: 'PATH-A', title: 'ENGINEERING FOUNDATION', units: 3, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
+    { code: 'PATH-B', title: 'COMPUTER ENGINEERING CORE', units: 3, originalTermId: 'y1t2', prerequisites: ['PATH-A'], corequisites: [], linkedLaboratories: [] },
+    { code: 'PATH-C', title: 'COMPUTER ENGINEERING THESIS 1', units: 6, originalTermId: 'y1t3', prerequisites: ['PATH-B'], corequisites: [], linkedLaboratories: [] },
+    { code: 'PATH-D', title: 'INTERNSHIP 1', units: 6, originalTermId: 'y1t3', prerequisites: ['PATH-B'], corequisites: [], linkedLaboratories: [] },
+  ],
+};
+const milestoneGraph = buildCurriculumGraph(milestoneCurriculum);
+const thesisNode = milestoneGraph.nodes.find((node) => node.course.code === 'PATH-C')!;
+const internshipNode = milestoneGraph.nodes.find((node) => node.course.code === 'PATH-D')!;
+const foundationNode = milestoneGraph.nodes.find((node) => node.course.code === 'PATH-A')!;
+assert.equal(thesisNode.milestoneKind, 'thesis', 'thesis metadata creates the dedicated boss-node class');
+assert.equal(internshipNode.milestoneKind, 'internship', 'internship metadata creates the distinct final-destination class');
+assert.ok(thesisNode.width > internshipNode.width && internshipNode.width > foundationNode.width, 'milestone dimensions preserve a thesis boss and wide internship destination hierarchy');
+assert.equal(foundationNode.metrics.distanceToThesis, 2, 'analysis records data-driven distance to thesis');
+assert.equal(foundationNode.metrics.distanceToInternship, 2, 'analysis records data-driven distance to internship');
+assert.equal(milestoneGraph.edges.find((edge) => edge.targetCode === 'PATH-C')?.branchKind, 'thesis', 'thesis ancestry receives the strongest branch class');
+assert.equal(milestoneGraph.edges.find((edge) => edge.targetCode === 'PATH-D')?.branchKind, 'core', 'internship ancestry remains a visually dominant core branch');
+assert.equal(graphNodesOverlap(milestoneGraph.nodes), false, 'larger dedicated milestone dimensions remain collision-free');
+
+const cycleCurriculum: Curriculum = {
+  ...curriculum,
+  id: 'cycle-layout',
+  courses: [
+    { code: 'CYCLE-A', title: 'COURSE A', units: 3, originalTermId: 'y1t1', prerequisites: ['CYCLE-C'], corequisites: [], linkedLaboratories: [] },
+    { code: 'CYCLE-B', title: 'COURSE B', units: 3, originalTermId: 'y1t2', prerequisites: ['CYCLE-A'], corequisites: [], linkedLaboratories: [] },
+    { code: 'CYCLE-C', title: 'COURSE C', units: 3, originalTermId: 'y1t3', prerequisites: ['CYCLE-B'], corequisites: [], linkedLaboratories: [] },
+  ],
+};
+const cycleGraph = buildCurriculumGraph(cycleCurriculum);
+assert.equal(cycleGraph.nodes.length, 3, 'a cycle does not hang or discard the map');
+assert.equal(cycleGraph.diagnostics.cycles.length, 1, 'prerequisite cycles are detected');
+assert.match(cycleGraph.validationErrors[0], /Prerequisite cycle detected/);
 
 const withKnownCorequisites = applyKnownCurriculumRules({
   ...curriculum,
@@ -196,4 +281,4 @@ for (const kind of ['earliest_graduation', 'lighter_workload', 'thesis_readiness
   }
 }
 
-console.log('Core tests passed: parser, strict Tatak suggestions, setup-derived Course Pool eligibility, prerequisite/corequisite rules, three-course pathways, free board positions, active-only planner setup, manual terms, plan migration, department card order, units, retakes, GWA, and load warnings.');
+console.log('Core tests passed: parser, weighted skill-tree layout, field affinity, cycle detection, crossing reduction, collision handling, chronological raids, strict availability, prerequisite/corequisite rules, setup progress, migration, units, retakes, GWA, and load warnings.');
