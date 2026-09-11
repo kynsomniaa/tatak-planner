@@ -94,7 +94,12 @@ function calculateFieldPlacement(
 
   const availableOffsets: number[] = [0];
   for (let step = 1; availableOffsets.length < present.length; step += 1) availableOffsets.push(-step, step);
-  const root = [...present].sort((left, right) => (importance.get(right.id) ?? 0) - (importance.get(left.id) ?? 0) || left.id.localeCompare(right.id))[0];
+  // The curriculum's foundation path owns the centerline through portable
+  // field metadata. Structural importance still orders fields within the
+  // surrounding technical ecosystem without hardcoded coordinates.
+  const root = [...present].sort((left, right) => right.spinePriority - left.spinePriority
+    || (importance.get(right.id) ?? 0) - (importance.get(left.id) ?? 0)
+    || left.id.localeCompare(right.id))[0];
   const offsets = new Map<CurriculumFieldId, number>();
   if (root) offsets.set(root.id, 0);
   while (offsets.size < present.length) {
@@ -105,7 +110,8 @@ function calculateFieldPlacement(
       const affinityToPlaced = (field: CurriculumFieldId) => [...offsets.keys()].reduce((sum, placed) => sum + (affinity.get(fieldPairKey(field, placed)) ?? 0), 0);
       const placementScore = (field: CurriculumFieldDefinition) => affinityToPlaced(field.id) * 1.25
         + (importance.get(field.id) ?? 0)
-        + priorityWeight(field.priority) * 0.72;
+        + priorityWeight(field.priority) * 0.72
+        + field.spinePriority * 1.4;
       return placementScore(right) - placementScore(left)
         || left.id.localeCompare(right.id);
     })[0];

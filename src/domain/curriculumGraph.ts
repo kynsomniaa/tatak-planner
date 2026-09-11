@@ -72,6 +72,7 @@ export interface CurriculumFieldDefinition {
   label: string;
   description: string;
   priority: CurriculumFieldPriority;
+  spinePriority: number;
 }
 
 export interface CurriculumGraphField extends CurriculumFieldDefinition {
@@ -108,17 +109,17 @@ export interface CurriculumGraphLayout {
 }
 
 export const curriculumFieldDefinitions: CurriculumFieldDefinition[] = [
-  { id: 'math-physics', label: 'Mathematics & Physics', description: 'Quantitative foundations and scientific reasoning.', priority: 'general-engineering' },
-  { id: 'programming-software', label: 'Programming & Software', description: 'Programming, algorithms, data, and software systems.', priority: 'cpe-core' },
-  { id: 'circuits-electronics', label: 'Electronics & Circuits', description: 'Electrical circuits and electronic devices.', priority: 'cpe-core' },
-  { id: 'cpe-core', label: 'Computer Engineering Core', description: 'Core CpE knowledge linking software and hardware.', priority: 'cpe-core' },
-  { id: 'hardware-embedded', label: 'Embedded & Microprocessors', description: 'Digital logic, processors, architecture, and control.', priority: 'cpe-core' },
-  { id: 'networks-systems', label: 'Networks & Cybersecurity', description: 'Communications, networks, operating systems, and security.', priority: 'cpe-core' },
-  { id: 'design-thesis', label: 'Capstone & Thesis', description: 'Research, design, and culminating project milestones.', priority: 'cpe-core' },
-  { id: 'internship', label: 'Internship', description: 'Supervised industry immersion and professional practice.', priority: 'cpe-core' },
-  { id: 'professional-engineering', label: 'Professional Engineering', description: 'Management, ethics, safety, and engineering practice.', priority: 'general-engineering' },
-  { id: 'general-communication', label: 'General Education', description: 'Communication, humanities, society, and supporting courses.', priority: 'supporting' },
-  { id: 'pe-nstp', label: 'PE & NSTP', description: 'Physical education and civic welfare sequences.', priority: 'supporting' },
+  { id: 'math-physics', label: 'Mathematics & Physics', description: 'Quantitative foundations and scientific reasoning.', priority: 'general-engineering', spinePriority: 1 },
+  { id: 'programming-software', label: 'Programming & Software', description: 'Programming, algorithms, data, and software systems.', priority: 'cpe-core', spinePriority: 0.86 },
+  { id: 'circuits-electronics', label: 'Electronics & Circuits', description: 'Electrical circuits and electronic devices.', priority: 'cpe-core', spinePriority: 0.82 },
+  { id: 'cpe-core', label: 'Computer Engineering Core', description: 'Core CpE knowledge linking software and hardware.', priority: 'cpe-core', spinePriority: 0.84 },
+  { id: 'hardware-embedded', label: 'Embedded & Microprocessors', description: 'Digital logic, processors, architecture, and control.', priority: 'cpe-core', spinePriority: 0.8 },
+  { id: 'networks-systems', label: 'Networks & Cybersecurity', description: 'Communications, networks, operating systems, and security.', priority: 'cpe-core', spinePriority: 0.78 },
+  { id: 'design-thesis', label: 'Capstone & Thesis', description: 'Research, design, and culminating project milestones.', priority: 'cpe-core', spinePriority: 0.76 },
+  { id: 'internship', label: 'Internship', description: 'Supervised industry immersion and professional practice.', priority: 'cpe-core', spinePriority: 0.72 },
+  { id: 'professional-engineering', label: 'Professional Engineering', description: 'Management, ethics, safety, and engineering practice.', priority: 'general-engineering', spinePriority: 0.48 },
+  { id: 'general-communication', label: 'General Education', description: 'Communication, humanities, society, and supporting courses.', priority: 'supporting', spinePriority: 0.12 },
+  { id: 'pe-nstp', label: 'PE & NSTP', description: 'Physical education and civic welfare sequences.', priority: 'supporting', spinePriority: 0.05 },
 ];
 
 const matches = (course: Course, expression: RegExp) => expression.test(`${course.code} ${course.title} ${course.description ?? ''}`.toUpperCase());

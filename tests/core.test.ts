@@ -169,18 +169,20 @@ assert.equal(new Set(graph.nodes.map((node) => node.course.code)).size, graph.no
 assert.equal(courseField(curriculum.courses[0]), 'cpe-core', 'each course derives a portable academic field rather than a fixed visual coordinate');
 assert.equal(curriculumFieldDefinitions.find((field) => field.id === 'programming-software')?.priority, 'cpe-core', 'Programming and Software participates in the technical core through field metadata');
 assert.equal(curriculumFieldDefinitions.find((field) => field.id === 'general-communication')?.priority, 'supporting', 'General Education remains a supporting region rather than displacing the CpE core');
+assert.ok((curriculumFieldDefinitions.find((field) => field.id === 'math-physics')?.spinePriority ?? 0) > (curriculumFieldDefinitions.find((field) => field.id === 'programming-software')?.spinePriority ?? 0), 'Mathematics and Physics owns the curriculum spine while Programming remains a nearby technical field');
 const priorityGraph = buildCurriculumGraph({
   ...curriculum,
   id: 'field-priority-layout',
   courses: [
+    { code: 'COE1000', title: 'CALCULUS 1', units: 3, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
     { code: 'CPE1000', title: 'PROGRAMMING FOUNDATIONS', units: 3, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
     { code: 'GED1000', title: 'ART APPRECIATION', units: 3, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
-    { code: 'NSTP1000', title: 'CIVIC WELFARE TRAINING SERVICE', units: 0, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
   ],
 });
+const mathCenter = priorityGraph.fields.find((field) => field.id === 'math-physics')!.centerY;
 const programmingCenter = priorityGraph.fields.find((field) => field.id === 'programming-software')!.centerY;
-const supportCenters = priorityGraph.fields.filter((field) => field.priority === 'supporting').map((field) => field.centerY);
-assert.equal(programmingCenter, supportCenters.reduce((sum, center) => sum + center, 0) / supportCenters.length, 'CpE field priority keeps Programming at the center while supporting fields occupy peripheral slots');
+const supportingCenter = priorityGraph.fields.find((field) => field.priority === 'supporting')!.centerY;
+assert.ok(programmingCenter < mathCenter && mathCenter < supportingCenter, 'the layout centers Mathematics and Physics between the nearby Programming branch and peripheral supporting fields');
 const firstTermNodes = graph.nodes.filter((node) => node.course.originalTermId === 'y1t1');
 const laterNodes = graph.nodes.filter((node) => node.course.originalTermId !== 'y1t1');
 assert.ok(Math.max(...firstTermNodes.map((node) => node.x)) < Math.min(...laterNodes.map((node) => node.x)), 'official first-term courses occupy the leftmost starting region');
