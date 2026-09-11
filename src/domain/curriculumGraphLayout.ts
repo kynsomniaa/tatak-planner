@@ -13,7 +13,7 @@ import type {
 const CANVAS_PADDING = 110;
 const RANK_SPACING = 390;
 const HORIZONTAL_GAP = 76;
-const VERTICAL_GAP = 38;
+const VERTICAL_GAP = 46;
 const FIELD_SPACING = 260;
 const LAYOUT_SWEEPS = 8;
 const STARTER_COLUMNS = 2;
@@ -27,8 +27,10 @@ const dimensions: Record<CourseImportance, { width: number; height: number }> = 
   major: { width: 260, height: 120 },
 };
 const milestoneDimensions = {
-  thesis: { width: 328, height: 156 },
-  internship: { width: 312, height: 134 },
+  // Roughly twice the previous visual mass. These are real layout dimensions,
+  // not post-layout transforms, so collision and edge routing stay accurate.
+  thesis: { width: 480, height: 228 },
+  internship: { width: 456, height: 198 },
 };
 const STARTING_REGION_EXIT = CANVAS_PADDING + STARTER_COLUMNS * dimensions.major.width + STARTER_COLUMN_GAP + HORIZONTAL_GAP;
 
@@ -49,6 +51,7 @@ function calculateFieldPlacement(
   edges: CurriculumGraphEdge[],
   definitions: CurriculumFieldDefinition[],
 ) {
+  const priorityWeight = (priority: CurriculumFieldDefinition['priority']) => priority === 'cpe-core' ? 1 : priority === 'general-engineering' ? 0.48 : 0;
   const present = definitions.filter((definition) => [...analysis.courses.values()].some((item) => item.fieldId === definition.id));
   const affinity = new Map<string, number>();
   const addAffinity = (left: CurriculumFieldId, right: CurriculumFieldId, amount: number) => {
@@ -86,7 +89,7 @@ function calculateFieldPlacement(
     const average = members.reduce((sum, item) => sum + item.importanceScore, 0) / Math.max(1, members.length);
     const milestone = Math.max(0, ...members.map((item) => item.metrics.milestoneWeight));
     const cross = (directCrossCount.get(definition.id) ?? 0) / maxCross;
-    importance.set(definition.id, Math.min(1.5, average + milestone * 0.65 + cross * 0.25));
+    importance.set(definition.id, Math.min(1.75, average + milestone * 0.65 + cross * 0.25 + priorityWeight(definition.priority) * 0.58));
   });
 
   const availableOffsets: number[] = [0];
@@ -96,10 +99,14 @@ function calculateFieldPlacement(
   if (root) offsets.set(root.id, 0);
   while (offsets.size < present.length) {
     const unplaced = present.filter((field) => !offsets.has(field.id));
-    const candidate = [...unplaced].sort((left, right) => {
+    const highestRemainingPriority = Math.max(...unplaced.map((field) => priorityWeight(field.priority)));
+    const priorityBand = unplaced.filter((field) => priorityWeight(field.priority) === highestRemainingPriority);
+    const candidate = [...priorityBand].sort((left, right) => {
       const affinityToPlaced = (field: CurriculumFieldId) => [...offsets.keys()].reduce((sum, placed) => sum + (affinity.get(fieldPairKey(field, placed)) ?? 0), 0);
-      return affinityToPlaced(right.id) - affinityToPlaced(left.id)
-        || (importance.get(right.id) ?? 0) - (importance.get(left.id) ?? 0)
+      const placementScore = (field: CurriculumFieldDefinition) => affinityToPlaced(field.id) * 1.25
+        + (importance.get(field.id) ?? 0)
+        + priorityWeight(field.priority) * 0.72;
+      return placementScore(right) - placementScore(left)
         || left.id.localeCompare(right.id);
     })[0];
     // The most graph-connected remaining field receives the next-nearest slot.
@@ -110,7 +117,11 @@ function calculateFieldPlacement(
   const maxOffset = Math.max(0, ...offsets.values());
   const centerline = CANVAS_PADDING + (Math.max(Math.abs(minOffset), Math.abs(maxOffset)) + 0.75) * FIELD_SPACING;
   const centers = new Map<CurriculumFieldId, number>();
-  offsets.forEach((offset, field) => centers.set(field, centerline + offset * FIELD_SPACING));
+  offsets.forEach((offset, field) => {
+    const definition = present.find((candidate) => candidate.id === field);
+    const compact = definition?.priority === 'cpe-core' ? 0.68 : definition?.priority === 'general-engineering' ? 0.84 : 1;
+    centers.set(field, centerline + offset * FIELD_SPACING * compact);
+  });
   return { centers, importance, affinity };
 }
 
@@ -404,9 +415,11 @@ export function calculateCurriculumLayout(
       return;
     }
     const fieldCenter = fieldPlacement.centers.get(node.fieldId) ?? centerline;
+    const fieldImportance = Math.min(1, (fieldPlacement.importance.get(node.fieldId) ?? 0) / 1.35);
     const branchOffset = (codeJitter(node.course.code) - 0.5) * 86;
     const fieldY = fieldCenter + branchOffset;
-    initialDesired.set(node.course.code, centerline + (fieldY - centerline) * (1 - node.importanceScore * 0.42));
+    const centralPull = Math.min(0.68, node.importanceScore * 0.32 + fieldImportance * 0.3);
+    initialDesired.set(node.course.code, centerline + (fieldY - centerline) * (1 - centralPull));
   });
   [...layers.keys()].sort((left, right) => left - right).forEach((rank) => packLayer(layers.get(rank) ?? [], initialDesired));
   const crossingCountBefore = crossingCount(nodes, edges);
@@ -432,9 +445,11 @@ export function calculateCurriculumLayout(
           ? relatedNodes.reduce((sum, related) => sum + centerY(related), 0) / relatedNodes.length
           : fieldPlacement.centers.get(node.fieldId) ?? centerline;
         const fieldY = fieldPlacement.centers.get(node.fieldId) ?? centerline;
+        const fieldImportance = Math.min(1, (fieldPlacement.importance.get(node.fieldId) ?? 0) / 1.35);
         const stability = node.importanceScore * 0.18;
         let targetY = relationY * 0.65 + fieldY * (0.35 - stability) + centerY(node) * stability;
-        targetY = centerline + (targetY - centerline) * (1 - node.importanceScore * 0.4);
+        const centralPull = Math.min(0.66, node.importanceScore * 0.3 + fieldImportance * 0.32);
+        targetY = centerline + (targetY - centerline) * (1 - centralPull);
         desired.set(node.course.code, targetY);
       });
       packLayer(layer, desired);

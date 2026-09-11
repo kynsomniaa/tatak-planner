@@ -1,23 +1,29 @@
 import React, { ReactNode, useEffect, useMemo, useRef, useState } from 'react';
 import { GestureResponderHandlers, LayoutChangeEvent, PanResponder, Platform, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { cameraForWorldRect, clampMapCamera, MapCameraState } from '../domain/mapCamera';
 import { contrastText, useAppTheme } from '../theme';
 
 const MIN_ZOOM = 0.12;
 const MAX_ZOOM = 1.6;
+const clampExactZoom = (value: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, value));
 const clampZoom = (value: number) => Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, Math.round(value * 20) / 20));
 
 export interface MapFocusRequest {
   token: number;
-  x: number;
-  y: number;
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
   zoom?: number;
+  camera?: MapCameraState;
 }
 
-export function CurriculumMapViewport({ contentWidth, contentHeight, focus, dragging = false, children }: {
+export function CurriculumMapViewport({ contentWidth, contentHeight, focus, dragging = false, onCameraChange, children }: {
   contentWidth: number;
   contentHeight: number;
   focus?: MapFocusRequest;
   dragging?: boolean;
+  onCameraChange?: (camera: MapCameraState) => void;
   children: (panHandlers: GestureResponderHandlers, panning: boolean) => ReactNode;
 }) {
   const theme = useAppTheme();
@@ -29,10 +35,18 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
   const panStartX = useRef(0);
   const panStartY = useRef(0);
   const webPan = useRef<{ pointerId: number; clientX: number; clientY: number; scrollX: number; scrollY: number; moved: boolean } | null>(null);
+  const pendingFocus = useRef<{ request: MapFocusRequest; zoom: number } | null>(null);
+  const onCameraChangeRef = useRef(onCameraChange);
   const lastWheelAt = useRef(0);
   const [zoom, setZoom] = useState(0.72);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [panning, setPanning] = useState(false);
+
+  useEffect(() => { onCameraChangeRef.current = onCameraChange; }, [onCameraChange]);
+
+  const reportCamera = (cameraZoom = zoom, panX = scrollX.current, panY = scrollY.current) => {
+    onCameraChangeRef.current?.({ zoom: cameraZoom, panX, panY });
+  };
 
   const scrollTo = (x: number, y: number, animated = false) => {
     const nextX = Math.max(0, Math.min(Math.max(0, contentWidth * zoom - viewport.width), x));
@@ -41,6 +55,7 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
     scrollY.current = nextY;
     horizontalRef.current?.scrollTo({ x: nextX, animated });
     verticalRef.current?.scrollTo({ y: nextY, animated });
+    reportCamera(zoom, nextX, nextY);
   };
   const applyZoom = (nextValue: number, pointX = viewport.width / 2, pointY = viewport.height / 2) => {
     const nextZoom = clampZoom(nextValue);
@@ -55,6 +70,7 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
       scrollY.current = nextY;
       horizontalRef.current?.scrollTo({ x: nextX, animated: false });
       verticalRef.current?.scrollTo({ y: nextY, animated: false });
+      reportCamera(nextZoom, nextX, nextY);
     });
   };
   const fit = () => {
@@ -64,6 +80,7 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
     scrollY.current = 0;
     horizontalRef.current?.scrollTo({ x: 0, animated: true });
     verticalRef.current?.scrollTo({ y: 0, animated: true });
+    reportCamera(nextZoom, 0, 0);
   };
 
   const canPan = (event: unknown) => {
@@ -98,17 +115,36 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
 
   useEffect(() => {
     if (!focus || viewport.width === 0 || viewport.height === 0) return;
-    const nextZoom = focus.zoom ?? Math.max(1, zoom);
-    setZoom(nextZoom);
-    requestAnimationFrame(() => {
-      const x = Math.max(0, Math.min(Math.max(0, contentWidth * nextZoom - viewport.width), focus.x * nextZoom - viewport.width / 2));
-      const y = Math.max(0, Math.min(Math.max(0, contentHeight * nextZoom - viewport.height), focus.y * nextZoom - viewport.height / 2));
-      scrollX.current = x;
-      scrollY.current = y;
-      horizontalRef.current?.scrollTo({ x, animated: true });
-      verticalRef.current?.scrollTo({ y, animated: true });
-    });
+    const nextZoom = clampExactZoom(focus.camera?.zoom ?? focus.zoom ?? Math.max(1, zoom));
+    pendingFocus.current = { request: focus, zoom: nextZoom };
+    if (nextZoom !== zoom) setZoom(nextZoom);
   }, [focus?.token, contentHeight, contentWidth, viewport.height, viewport.width]);
+
+  // Run after the zoomed scroll surface has committed. Scrolling during the
+  // render that changes zoom lets the browser clamp against the previous size,
+  // which caused the course locator to miss its target at non-100% scales.
+  useEffect(() => {
+    const pending = pendingFocus.current;
+    if (!pending || pending.zoom !== zoom || viewport.width === 0 || viewport.height === 0) return;
+    pendingFocus.current = null;
+    const content = { width: contentWidth, height: contentHeight };
+    const visible = { width: viewport.width, height: viewport.height };
+    const camera = pending.request.camera
+      ? clampMapCamera({ ...pending.request.camera, zoom }, content, visible)
+      : cameraForWorldRect({
+        x: pending.request.x ?? 0,
+        y: pending.request.y ?? 0,
+        width: pending.request.width ?? 0,
+        height: pending.request.height ?? 0,
+      }, zoom, content, visible);
+    requestAnimationFrame(() => {
+      scrollX.current = camera.panX;
+      scrollY.current = camera.panY;
+      horizontalRef.current?.scrollTo({ x: camera.panX, animated: true });
+      verticalRef.current?.scrollTo({ y: camera.panY, animated: true });
+      reportCamera(camera.zoom, camera.panX, camera.panY);
+    });
+  }, [zoom, focus?.token, contentHeight, contentWidth, viewport.height, viewport.width]);
 
   useEffect(() => {
     if (Platform.OS !== 'web') return;
@@ -173,8 +209,12 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
 
   const scaledWidth = Math.max(viewport.width, contentWidth * zoom);
   const scaledHeight = Math.max(viewport.height, contentHeight * zoom);
-  const centeredOffsetX = Math.max(0, (viewport.width - contentWidth * zoom) / 2) / zoom;
-  const centeredOffsetY = Math.max(0, (viewport.height - contentHeight * zoom) / 2) / zoom;
+  // CSS transforms do not scale layout offsets. Keep the centering offset in
+  // viewport pixels and absolutely position the transformed map inside the
+  // explicitly sized scroll surface. Dividing these values by `zoom` pushes a
+  // fitted (sub-100%) map far outside of the visible viewport on web.
+  const centeredOffsetX = Math.max(0, (viewport.width - contentWidth * zoom) / 2);
+  const centeredOffsetY = Math.max(0, (viewport.height - contentHeight * zoom) / 2);
   return (
     <View style={[styles.wrapper, dragging && styles.wrapperDragging]}>
       <View style={[styles.controls, { backgroundColor: theme.surface, borderColor: theme.border }]}>
@@ -185,10 +225,10 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
         <Pressable onPress={fit} style={[styles.fit, { backgroundColor: theme.green100 }]}><Text style={[styles.fitText, { color: contrastText(theme.green100, '#FFFFFF', theme.green900) }]}>Fit map</Text></Pressable>
       </View>
       <View ref={frameRef} style={[styles.frame, { cursor: panning ? 'grabbing' : 'grab' } as never, dragging && styles.frameDragging]} onLayout={(event: LayoutChangeEvent) => setViewport({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height })}>
-        <ScrollView style={dragging && styles.frameDragging} ref={verticalRef} nestedScrollEnabled showsVerticalScrollIndicator contentContainerStyle={{ minHeight: scaledHeight }} onScroll={(event) => { scrollY.current = event.nativeEvent.contentOffset.y; }} scrollEventThrottle={32}>
-          <ScrollView style={dragging && styles.frameDragging} ref={horizontalRef} horizontal nestedScrollEnabled showsHorizontalScrollIndicator contentContainerStyle={{ width: scaledWidth, minHeight: scaledHeight }} onScroll={(event) => { scrollX.current = event.nativeEvent.contentOffset.x; }} scrollEventThrottle={32}>
+        <ScrollView style={dragging && styles.frameDragging} ref={verticalRef} nestedScrollEnabled showsVerticalScrollIndicator contentContainerStyle={{ minHeight: scaledHeight }} onScroll={(event) => { scrollY.current = event.nativeEvent.contentOffset.y; reportCamera(zoom, scrollX.current, scrollY.current); }} scrollEventThrottle={32}>
+          <ScrollView style={dragging && styles.frameDragging} ref={horizontalRef} horizontal nestedScrollEnabled showsHorizontalScrollIndicator contentContainerStyle={{ width: scaledWidth, minHeight: scaledHeight }} onScroll={(event) => { scrollX.current = event.nativeEvent.contentOffset.x; reportCamera(zoom, scrollX.current, scrollY.current); }} scrollEventThrottle={32}>
             <View style={{ width: scaledWidth, minHeight: scaledHeight }}>
-              <View style={{ width: contentWidth, height: contentHeight, marginLeft: centeredOffsetX, marginTop: centeredOffsetY, transform: [{ scale: zoom }], transformOrigin: 'top left' }}>
+              <View style={{ position: 'absolute', left: centeredOffsetX, top: centeredOffsetY, width: contentWidth, height: contentHeight, transform: [{ scale: zoom }], transformOrigin: 'top left' }}>
                 {children(panResponder.panHandlers, panning)}
               </View>
             </View>

@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, useWindowDimensions, View } from 'react-native';
 import { Draggable, DraggableState, Droppable, DropProvider } from 'react-native-reanimated-dnd';
 import { Course, CourseRating, CourseStatus, CurriculumTerm, StudentWorkspace } from '../types';
@@ -26,6 +26,8 @@ import {
 } from '../domain/planner';
 import { academicTermLabel } from '../domain/academicCalendar';
 import { courseDepartment } from '../domain/coursePresentation';
+import { MapCameraState, raidLocateZoom } from '../domain/mapCamera';
+import { courseRatingPreview } from '../domain/ratingPresentation';
 import { ratingSummary } from '../services/ratings';
 import { CourseDetailsModal } from './CourseDetailsModal';
 import { CurriculumGraphEdges } from './CurriculumGraphEdges';
@@ -34,6 +36,12 @@ import { CurriculumMapViewport, MapFocusRequest } from './CurriculumMapViewport'
 interface RaidCourseDragData {
   kind: 'raid-course';
   courseCode: string;
+}
+
+interface RaidFocusMode {
+  courseCode: string;
+  previousCamera: MapCameraState;
+  plannerWasOpen: boolean;
 }
 
 const transparent = (hex: string, opacity: number) => /^#[0-9A-F]{6}$/i.test(hex)
@@ -63,6 +71,8 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
   const [detailsVisible, setDetailsVisible] = useState(false);
   const [showEveryArrow, setShowEveryArrow] = useState(false);
   const [focus, setFocus] = useState<MapFocusRequest | undefined>();
+  const [raidFocus, setRaidFocus] = useState<RaidFocusMode | null>(null);
+  const cameraRef = useRef<MapCameraState>({ zoom: mobile ? 0.62 : 0.72, panX: 0, panY: 0 });
   const [dragVersion, setDragVersion] = useState(0);
   const [draggingId, setDraggingId] = useState<string | null>(null);
   if (!curriculum) return null;
@@ -93,10 +103,13 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
   useEffect(() => {
     setFocus({
       token: Date.now(),
-      x: graph.startingRegion.x + graph.startingRegion.width / 2,
-      y: graph.startingRegion.y + graph.startingRegion.height / 2,
+      x: graph.startingRegion.x,
+      y: graph.startingRegion.y,
+      width: graph.startingRegion.width,
+      height: graph.startingRegion.height,
       zoom: mobile ? 0.62 : 0.72,
     });
+    setRaidFocus(null);
   }, [curriculum.id]);
 
   const bundleStatus = (course: Course): CourseStatus => {
@@ -106,12 +119,34 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
     if (statuses.some((status) => status === 'retake')) return 'retake';
     return 'pending';
   };
-  const focusCourse = (code: string, showDetails = false) => {
+  const selectMapCourse = (code: string, showDetails = false) => {
+    setSelectedCourseCode(code);
+    if (showDetails) setDetailsVisible(true);
+  };
+  const locateCourseFromRaid = (code: string) => {
     const node = graph.nodes.find((candidate) => candidate.course.code === code);
     if (!node) return;
     setSelectedCourseCode(code);
-    setFocus({ token: Date.now(), x: node.x + node.width / 2, y: node.y + node.height / 2 });
-    if (showDetails) setDetailsVisible(true);
+    setRaidFocus((current) => ({
+      courseCode: code,
+      previousCamera: current?.previousCamera ?? { ...cameraRef.current },
+      plannerWasOpen: current?.plannerWasOpen ?? raidOpen,
+    }));
+    setRaidOpen(true);
+    setFocus({
+      token: Date.now(),
+      x: node.x,
+      y: node.y,
+      width: node.width,
+      height: node.height,
+      zoom: raidLocateZoom(cameraRef.current.zoom),
+    });
+  };
+  const exitRaidFocus = () => {
+    if (!raidFocus) return;
+    setFocus({ token: Date.now(), camera: raidFocus.previousCamera });
+    setRaidOpen(raidFocus.plannerWasOpen);
+    setRaidFocus(null);
   };
   const finishDrag = () => {
     setDraggingId(null);
@@ -130,7 +165,6 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
       return;
     }
     onChange(result.workspace);
-    focusCourse(courseCode);
   };
   const newRaid = () => {
     const next = addNextPlannerTerm(workspace);
@@ -154,16 +188,16 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
           <View style={styles.heroCopy}><Text style={[styles.eyebrow, { color: theme.gold }]}>DEGREE EXPEDITION</Text><Text style={[styles.title, { color: contrastText(theme.green900) }]}>Curriculum Map</Text><Text style={[styles.subtitle, { color: contrastText(theme.green900) }]}>Explore connected fields, conquer courses, and assemble your next trimester raid.</Text><View style={styles.mapProgressRow}><Text style={[styles.mapProgressLabel, { color: contrastText(theme.green900) }]}>Degree progress · {progressPercent}%</Text><View style={[styles.mapProgressTrack, { backgroundColor: theme.green800 }]}><View style={[styles.mapProgressFill, { width: `${progressPercent}%`, backgroundColor: theme.gold }]} /></View></View></View>
           <View style={styles.heroActions}>
             <Pressable onPress={() => setShowEveryArrow((value) => !value)} style={[styles.heroButton, { backgroundColor: showEveryArrow ? theme.gold : theme.surface, borderColor: theme.border }]}><Text style={[styles.heroButtonText, { color: showEveryArrow ? contrastText(theme.gold) : theme.ink }]}>{showEveryArrow ? 'Every arrow on' : 'Show every arrow'}</Text></Pressable>
-            <Pressable onPress={() => setRaidOpen(true)} style={[styles.raidButton, { backgroundColor: theme.gold }]}><Text style={[styles.raidButtonText, { color: contrastText(theme.gold) }]}>⚔ Raid Planner</Text></Pressable>
+            <Pressable onPress={() => raidFocus ? exitRaidFocus() : setRaidOpen(true)} style={[styles.raidButton, { backgroundColor: theme.gold }]}><Text style={[styles.raidButtonText, { color: contrastText(theme.gold) }]}>{raidFocus ? '← Return to Raid Planner' : '⚔ Raid Planner'}</Text></Pressable>
           </View>
         </View>
         <View style={styles.body}>
           <View style={[styles.mapPane, draggingId && styles.mapPaneDragging]}>
-            <CurriculumMapViewport contentWidth={graph.width} contentHeight={graph.height} focus={focus} dragging={Boolean(draggingId)}>
+            <CurriculumMapViewport contentWidth={graph.width} contentHeight={graph.height} focus={focus} dragging={Boolean(draggingId)} onCameraChange={(camera) => { cameraRef.current = camera; }}>
               {(panHandlers, panning) => (
                 <View style={[styles.mapCanvas, { width: graph.width, height: graph.height }]}>
                   <View nativeID="curriculum-map-pan" style={[StyleSheet.absoluteFillObject, { cursor: panning ? 'grabbing' : 'grab' } as never]} {...panHandlers} />
-                  <View pointerEvents="none" style={[styles.startingRegion, { left: graph.startingRegion.x, top: graph.startingRegion.y, width: graph.startingRegion.width, height: graph.startingRegion.height, borderColor: transparent(theme.gold, 0.55), backgroundColor: transparent(theme.gold, 0.07) }]}><Text style={[styles.startingRegionTitle, { color: theme.gold }]}>START · FIRST YEAR / FIRST TERM</Text></View>
+                  <View style={[styles.startingRegion, { left: graph.startingRegion.x, top: graph.startingRegion.y, width: graph.startingRegion.width, height: graph.startingRegion.height, borderColor: transparent(theme.gold, 0.55), backgroundColor: transparent(theme.gold, 0.07), pointerEvents: 'none' }]}><Text style={[styles.startingRegionTitle, { color: theme.gold }]}>START · FIRST YEAR / FIRST TERM</Text></View>
                   {graph.fields.map((field) => {
                     const accent = fieldAccent(field.id, theme);
                     const relevant = !inspectedCourseCode || graph.nodes.some((node) => node.fieldId === field.id && inspectedPath.courseCodes.has(node.course.code));
@@ -194,7 +228,7 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
                       planned={plannedCodes.has(node.course.code)}
                       combinedUnits={courseBundleCodes(curriculum, node.course.code).reduce((sum, code) => sum + (byCode.get(code)?.units ?? 0), 0)}
                       dragVersion={dragVersion}
-                      onFocus={() => focusCourse(node.course.code)}
+                      onFocus={() => selectMapCourse(node.course.code)}
                       onHoverIn={() => setHoveredCourseCode(node.course.code)}
                       onHoverOut={() => setHoveredCourseCode((current) => current === node.course.code ? null : current)}
                       onDragStart={() => setDraggingId(`map-${node.course.code}`)}
@@ -213,7 +247,7 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
             </CurriculumMapViewport>
             {graph.validationErrors.length > 0 && <View style={[styles.graphError, { backgroundColor: theme.dangerSoft, borderColor: theme.danger }]}><Text style={[styles.graphErrorTitle, { color: theme.danger }]}>Curriculum data needs attention</Text><Text numberOfLines={3} style={[styles.graphErrorText, { color: theme.ink }]}>{graph.validationErrors.join('\n')}</Text></View>}
             {selectedCourse && <View style={[styles.focusCard, { backgroundColor: theme.surface, borderColor: theme.arrowCpe }]}>
-              <View style={styles.focusTop}><View><Text style={[styles.focusCode, { color: theme.green700 }]}>{selectedCourse.code}</Text><Text numberOfLines={2} style={[styles.focusTitle, { color: theme.ink }]}>{selectedCourse.title}</Text></View><Pressable onPress={() => setSelectedCourseCode(null)}><Text style={[styles.focusClose, { color: theme.muted }]}>×</Text></Pressable></View>
+              <View style={styles.focusTop}><View><Text style={[styles.focusCode, { color: theme.green700 }]}>{selectedCourse.code}</Text><Text numberOfLines={2} style={[styles.focusTitle, { color: theme.ink }]}>{selectedCourse.title}</Text></View><Pressable onPress={() => raidFocus ? exitRaidFocus() : setSelectedCourseCode(null)}><Text style={[styles.focusClose, { color: theme.muted }]}>×</Text></Pressable></View>
               <Text style={[styles.focusMeta, { color: theme.muted }]}>{courseBundleCodes(curriculum, selectedCourse.code).reduce((sum, code) => sum + (byCode.get(code)?.units ?? 0), 0)} units · {selectedCourse.prerequisites.length ? `Requires ${selectedCourse.prerequisites.join(', ')}` : 'No prerequisites'}</Text>
               <View style={styles.focusActions}>{availableCodes.has(selectedCourse.code) && <Pressable onPress={() => addToRaid(selectedCourse.code)} style={[styles.addButton, { backgroundColor: theme.gold }]}><Text style={[styles.addButtonText, { color: contrastText(theme.gold) }]}>＋ Add to raid</Text></Pressable>}<Pressable onPress={() => setDetailsVisible(true)} style={[styles.detailButton, { backgroundColor: theme.canvas }]}><Text style={[styles.detailButtonText, { color: theme.ink }]}>Course details</Text></Pressable></View>
             </View>}
@@ -230,12 +264,15 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
             editable={editableRaid}
             firstTermId={firstTermId}
             visibleCourses={visibleCourses}
+            ratings={ratings}
             selectedCourseCode={selectedCourseCode}
+            locatingCourseCode={raidFocus?.courseCode ?? null}
             dragVersion={dragVersion}
             draggingId={draggingId}
             onOpenChange={setRaidOpen}
             onSelectRaid={setSelectedRaidId}
-            onFocusCourse={(code) => { focusCourse(code); if (mobile) setRaidOpen(false); }}
+            onLocateCourse={locateCourseFromRaid}
+            onExitLocate={exitRaidFocus}
             onAdd={addToRaid}
             onRemove={(courseCode) => onChange(removeCourseFromPlan(workspace, courseCode))}
             onNewRaid={newRaid}
@@ -300,6 +337,7 @@ function MapCourseNode({ node, status, available, selected, pathHighlighted, rel
   const relationLabel = relation === 'ancestor' ? (directRelation ? 'DIRECT PREREQUISITE' : 'PREREQUISITE PATH') : relation === 'descendant' ? (directRelation ? 'DIRECTLY UNLOCKS' : 'DEPENDENT PATH') : null;
   const thesis = node.milestoneKind === 'thesis';
   const internship = node.milestoneKind === 'internship';
+  const auraColor = thesis ? theme.arrowCpe : theme.gold;
   const milestoneDesignation = thesis ? 'THESIS · BOSS ENCOUNTER' : internship ? 'INTERNSHIP · FINAL DESTINATION' : null;
   const bossShape = Platform.OS === 'web' && thesis ? { clipPath: 'polygon(18px 0, calc(100% - 18px) 0, 100% 18px, 100% calc(100% - 18px), calc(100% - 18px) 100%, 18px 100%, 0 calc(100% - 18px), 0 18px)' } as never : undefined;
   const destinationShape = Platform.OS === 'web' && internship ? { clipPath: 'polygon(0 0, calc(100% - 30px) 0, 100% 50%, calc(100% - 30px) 100%, 0 100%, 14px 50%)' } as never : undefined;
@@ -313,12 +351,14 @@ function MapCourseNode({ node, status, available, selected, pathHighlighted, rel
     {relationLabel && <Text numberOfLines={1} style={[styles.relationLabel, { color: relationColor }]}>{relationLabel}</Text>}
     <View style={styles.nodeBottom}><Text style={[styles.nodeStatus, { color: foreground }]}>{label}</Text>{node.importance === 'major' && !milestoneDesignation && <Text style={[styles.milestoneLabel, { color: foreground }]}>MILESTONE</Text>}{available && <Draggable.Handle style={[styles.nodeDrag, { backgroundColor: theme.canvas }]}><Text style={[styles.nodeDragIcon, { color: theme.green700 }]}>⠿</Text></Draggable.Handle>}</View>
   </Pressable>;
+  const aura = (thesis || internship) ? <><View style={[styles.milestoneAura, thesis ? styles.bossAura : styles.destinationAura, { borderColor: transparent(auraColor, thesis ? 0.78 : 0.58), backgroundColor: transparent(auraColor, thesis ? 0.1 : 0.07), shadowColor: auraColor, pointerEvents: 'none' }]} /><View style={[styles.milestoneAuraInner, thesis ? styles.bossAuraInner : styles.destinationAuraInner, { borderColor: transparent(auraColor, 0.48), pointerEvents: 'none' }]} /></> : null;
+  const nodeShell = <View style={styles.nodeShell}>{aura}{content}</View>;
   const position = { position: 'absolute' as const, left: node.x, top: node.y, width: node.width, height: node.height, zIndex: selected ? 25 : 12 };
-  if (!available) return <View style={position}>{content}</View>;
-  return <Draggable<RaidCourseDragData> key={`map-${node.course.code}-${dragVersion}`} data={{ kind: 'raid-course', courseCode: node.course.code }} draggableId={`map-${node.course.code}`} collisionAlgorithm="intersect" onDragStart={onDragStart} onStateChange={onDragState} style={[position, styles.draggableNode]}>{content}</Draggable>;
+  if (!available) return <View style={position}>{nodeShell}</View>;
+  return <Draggable<RaidCourseDragData> key={`map-${node.course.code}-${dragVersion}`} data={{ kind: 'raid-course', courseCode: node.course.code }} draggableId={`map-${node.course.code}`} collisionAlgorithm="intersect" onDragStart={onDragStart} onStateChange={onDragState} style={[position, styles.draggableNode]}>{nodeShell}</Draggable>;
 }
 
-function RaidPlanner({ open, mobile, columns, workspace, raids, selectedRaid, availableCodes, editable, firstTermId, visibleCourses, selectedCourseCode, dragVersion, draggingId, onOpenChange, onSelectRaid, onFocusCourse, onAdd, onRemove, onNewRaid, onRename, onDragStart, onDragState }: {
+function RaidPlanner({ open, mobile, columns, workspace, raids, selectedRaid, availableCodes, editable, firstTermId, visibleCourses, ratings, selectedCourseCode, locatingCourseCode, dragVersion, draggingId, onOpenChange, onSelectRaid, onLocateCourse, onExitLocate, onAdd, onRemove, onNewRaid, onRename, onDragStart, onDragState }: {
   open: boolean;
   mobile: boolean;
   columns: number;
@@ -329,12 +369,15 @@ function RaidPlanner({ open, mobile, columns, workspace, raids, selectedRaid, av
   editable: boolean;
   firstTermId?: string;
   visibleCourses: Course[];
+  ratings: CourseRating[];
   selectedCourseCode: string | null;
+  locatingCourseCode: string | null;
   dragVersion: number;
   draggingId: string | null;
   onOpenChange: (open: boolean) => void;
   onSelectRaid: (id: string) => void;
-  onFocusCourse: (code: string) => void;
+  onLocateCourse: (code: string) => void;
+  onExitLocate: () => void;
   onAdd: (code: string) => void;
   onRemove: (code: string) => void;
   onNewRaid: () => void;
@@ -344,6 +387,7 @@ function RaidPlanner({ open, mobile, columns, workspace, raids, selectedRaid, av
 }) {
   const theme = useAppTheme();
   if (!open) return <Pressable onPress={() => onOpenChange(true)} style={[styles.raidCollapsed, mobile && styles.raidCollapsedMobile, { backgroundColor: theme.green900 }]}><Text style={[styles.raidCollapsedIcon, { color: theme.gold }]}>⚔</Text><Text style={[styles.raidCollapsedText, mobile && styles.raidCollapsedTextMobile, { color: contrastText(theme.green900) }]}>RAID PLANNER</Text></Pressable>;
+  if (locatingCourseCode) return <View style={[styles.raidLocatePanel, mobile && styles.raidLocatePanelMobile, { backgroundColor: theme.green900, borderColor: theme.gold, shadowColor: theme.gold }]}><View style={styles.raidLocateCopy}><Text style={[styles.raidLocateEyebrow, { color: theme.gold }]}>RAID PLANNER · MAP LOCATOR</Text><Text style={[styles.raidLocateTitle, { color: contrastText(theme.green900) }]}>Locating {locatingCourseCode}</Text></View><Pressable onPress={onExitLocate} style={[styles.raidLocateReturn, { backgroundColor: theme.gold }]}><Text style={[styles.raidLocateReturnText, { color: contrastText(theme.gold) }]}>← Return</Text></Pressable></View>;
   const curriculum = workspace.curriculum!;
   const planned = new Set(workspace.plannedCourseCodes ?? []);
   const roster = selectedRaid ? visibleCourses.filter((course) => planned.has(course.code) && workspace.plan[course.code] === selectedRaid.id) : [];
@@ -381,7 +425,7 @@ function RaidPlanner({ open, mobile, columns, workspace, raids, selectedRaid, av
               const conquered = status === 'passed';
               const active = status === 'active';
               const background = conquered ? theme.green700 : active ? theme.gold : theme.surface;
-              return <Pressable key={course.code} onPress={() => onFocusCourse(course.code)} style={[styles.rosterCourse, { width: `${100 / Math.min(columns, 4) - 1.5}%` as `${number}%`, backgroundColor: background, borderColor: selectedCourseCode === course.code ? theme.arrowCpe : conquered ? theme.gold : active ? theme.arrowCpe : theme.border }, selectedCourseCode === course.code && styles.raidCourseSelected]}><Text style={[styles.rosterCode, { color: conquered || active ? contrastText(background) : theme.green700 }]}>{course.code}</Text><Text numberOfLines={2} style={[styles.rosterTitle, { color: conquered || active ? contrastText(background) : theme.ink }]}>{course.title}</Text><View style={styles.rosterBottom}><Text style={[styles.rosterStatus, { color: conquered || active ? contrastText(background) : theme.muted }]}>{conquered ? '✓ CONQUERED' : active ? '⚔ ACTIVE' : 'PLANNED'}</Text>{editable && !conquered && !active && <Pressable onPress={(event) => { event.stopPropagation(); onRemove(course.code); }}><Text style={[styles.removeCourse, { color: theme.danger }]}>Remove</Text></Pressable>}</View></Pressable>;
+              return <Pressable key={course.code} onPress={() => onLocateCourse(course.code)} style={[styles.rosterCourse, { width: `${100 / Math.min(columns, 4) - 1.5}%` as `${number}%`, backgroundColor: background, borderColor: selectedCourseCode === course.code ? theme.arrowCpe : conquered ? theme.gold : active ? theme.arrowCpe : theme.border }, selectedCourseCode === course.code && styles.raidCourseSelected]}><Text style={[styles.rosterCode, { color: conquered || active ? contrastText(background) : theme.green700 }]}>{course.code}</Text><Text numberOfLines={2} style={[styles.rosterTitle, { color: conquered || active ? contrastText(background) : theme.ink }]}>{course.title}</Text><View style={styles.rosterBottom}><Text style={[styles.rosterStatus, { color: conquered || active ? contrastText(background) : theme.muted }]}>{conquered ? '✓ CONQUERED' : active ? '⚔ ACTIVE' : 'PLANNED'}</Text><Text style={[styles.locateHint, { color: conquered || active ? contrastText(background) : theme.green700 }]}>⌖ Locate</Text>{editable && !conquered && !active && <Pressable onPress={(event) => { event.stopPropagation(); onRemove(course.code); }}><Text style={[styles.removeCourse, { color: theme.danger }]}>Remove</Text></Pressable>}</View></Pressable>;
             })}
             {roster.length === 0 && <Text style={[styles.emptyRoster, { color: theme.muted }]}>This raid has no courses yet.</Text>}
           </ScrollView>
@@ -393,7 +437,8 @@ function RaidPlanner({ open, mobile, columns, workspace, raids, selectedRaid, av
             const selected = selectedCourseCode === course.code;
             const units = courseBundleCodes(curriculum, course.code).reduce((sum, code) => sum + (curriculum.courses.find((candidate) => candidate.code === code)?.units ?? 0), 0);
             const field = fieldLabels.get(courseField(course)) ?? 'Course';
-            const tile = <Pressable onPress={() => onFocusCourse(course.code)} style={[styles.choice, { backgroundColor: selected ? theme.green100 : theme.canvas, borderColor: selected ? theme.gold : theme.arrowCpe, shadowColor: selected ? theme.gold : theme.arrowCpe }, selected && styles.raidCourseSelected]}><View style={styles.choiceTop}><Text style={[styles.choiceCode, { color: theme.green700 }]}>{course.code}</Text><Text style={[styles.choiceUnits, { color: theme.muted }]}>{units}u</Text><Draggable.Handle style={[styles.choiceDrag, { backgroundColor: theme.surface }]}><Text style={[styles.choiceDragText, { color: theme.green700 }]}>⠿</Text></Draggable.Handle></View><Text numberOfLines={2} style={[styles.choiceTitle, { color: theme.ink }]}>{course.title}</Text><Text numberOfLines={1} style={[styles.choiceField, { color: theme.muted }]}>{field}</Text><Text style={[styles.choiceUnlocked, { color: theme.green700 }]}>✓ Prerequisites cleared</Text><Pressable onPress={(event) => { event.stopPropagation(); onAdd(course.code); }} style={[styles.choiceAdd, { backgroundColor: theme.gold }]}><Text style={[styles.choiceAddText, { color: contrastText(theme.gold) }]}>＋ Add to Raid {raidNumber}</Text></Pressable></Pressable>;
+            const rating = courseRatingPreview(ratingSummary(course.code, ratings));
+            const tile = <Pressable onPress={() => onLocateCourse(course.code)} style={[styles.choice, { backgroundColor: selected ? theme.green100 : theme.canvas, borderColor: selected ? theme.gold : theme.arrowCpe, shadowColor: selected ? theme.gold : theme.arrowCpe }, selected && styles.raidCourseSelected]}><View style={styles.choiceTop}><Text style={[styles.choiceCode, { color: theme.green700 }]}>{course.code}</Text><Text style={[styles.choiceUnits, { color: theme.muted }]}>{units}u</Text><Draggable.Handle style={[styles.choiceDrag, { backgroundColor: theme.surface }]}><Text style={[styles.choiceDragText, { color: theme.green700 }]}>⠿</Text></Draggable.Handle></View><Text numberOfLines={2} style={[styles.choiceTitle, { color: theme.ink }]}>{course.title}</Text><Text numberOfLines={1} style={[styles.choiceField, { color: theme.muted }]}>{field}</Text><Text style={[styles.choiceRating, { color: rating === null ? theme.muted : theme.gold }]}>{rating ?? 'No ratings yet'}</Text><Text style={[styles.choiceUnlocked, { color: theme.green700 }]}>✓ Prerequisites cleared · ⌖ Locate on map</Text><Pressable onPress={(event) => { event.stopPropagation(); onAdd(course.code); }} style={[styles.choiceAdd, { backgroundColor: theme.gold }]}><Text style={[styles.choiceAddText, { color: contrastText(theme.gold) }]}>＋ Add to Raid {raidNumber}</Text></Pressable></Pressable>;
             return <Draggable<RaidCourseDragData> key={`${dragId}-${dragVersion}`} data={{ kind: 'raid-course', courseCode: course.code }} draggableId={dragId} collisionAlgorithm="intersect" onDragStart={() => onDragStart(dragId)} onStateChange={onDragState} style={[styles.choiceSlot, { width: `${100 / columns - 1.4}%` as `${number}%` }]}>{tile}</Draggable>;
           })}
           {choices.length === 0 && <Text style={[styles.noChoices, { color: theme.muted }]}>{editable ? 'No additional courses are valid for this raid yet. Complete prerequisites or create the next raid.' : 'Select the current or a future raid to see available choices.'}</Text>}
@@ -449,7 +494,14 @@ const styles = StyleSheet.create({
   legendItem: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   legendDot: { width: 7, height: 7, borderRadius: 4 },
   legendText: { fontSize: 7, fontWeight: '800' },
-  mapNode: { padding: 11, borderRadius: 15, borderWidth: 2, overflow: 'hidden', shadowOpacity: 0.08, shadowRadius: 8, elevation: 3 },
+  nodeShell: { width: '100%', height: '100%', position: 'relative', overflow: 'visible' },
+  milestoneAura: { position: 'absolute', left: -22, right: -22, top: -20, bottom: -20, borderWidth: 4, shadowOpacity: 0.9, shadowRadius: 34, elevation: 8 },
+  milestoneAuraInner: { position: 'absolute', left: -11, right: -11, top: -10, bottom: -10, borderWidth: 2, shadowOpacity: 0.6, shadowRadius: 18, elevation: 9 },
+  bossAura: { borderRadius: 8, borderStyle: 'dashed', transform: [{ scale: 1.035 }] },
+  bossAuraInner: { borderRadius: 5 },
+  destinationAura: { left: -34, right: -48, top: -15, bottom: -15, borderRadius: 48, borderWidth: 3 },
+  destinationAuraInner: { left: -18, right: -30, top: -8, bottom: -8, borderRadius: 40 },
+  mapNode: { padding: 11, borderRadius: 15, borderWidth: 2, overflow: 'hidden', shadowOpacity: 0.08, shadowRadius: 8, elevation: 3, zIndex: 1 },
   draggableNode: { zIndex: 18, elevation: 18 },
   milestoneNode: { borderWidth: 4, borderRadius: 20, shadowOpacity: 0.3, shadowRadius: 20, elevation: 14 },
   bossNode: { paddingHorizontal: 20, paddingVertical: 16, borderWidth: 6, borderRadius: 4, shadowOpacity: 0.58, shadowRadius: 28, elevation: 22 },
@@ -498,9 +550,16 @@ const styles = StyleSheet.create({
   addButtonText: { fontSize: 8, fontWeight: '900' },
   detailButton: { minHeight: 34, paddingHorizontal: 10, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   detailButtonText: { fontSize: 8, fontWeight: '900' },
-  raidPanel: { position: 'absolute', right: 10, top: -80, bottom: -8, width: '92%', maxWidth: 1240, minWidth: 680, borderWidth: 1, borderRadius: 20, overflow: 'hidden', zIndex: 900, elevation: 90, shadowOpacity: 0.32, shadowRadius: 30 },
-  raidPanelMobile: { left: 6, right: 6, top: -102, bottom: -8, width: 'auto', minWidth: 0, borderWidth: 1, borderRadius: 18, zIndex: 900, elevation: 90 },
+  raidPanel: { position: 'absolute', right: 10, top: -86, bottom: -8, width: '92%', maxWidth: 1240, minWidth: 680, borderWidth: 1, borderRadius: 20, overflow: 'hidden', zIndex: 900, elevation: 90, shadowOpacity: 0.32, shadowRadius: 30 },
+  raidPanelMobile: { left: 6, right: 6, top: -108, bottom: -8, width: 'auto', minWidth: 0, borderWidth: 1, borderRadius: 18, zIndex: 900, elevation: 90 },
   raidPanelDragging: { overflow: 'visible' },
+  raidLocatePanel: { position: 'absolute', right: 12, top: 60, width: 400, minHeight: 72, padding: 11, borderRadius: 16, borderWidth: 2, flexDirection: 'row', alignItems: 'center', zIndex: 900, elevation: 90, shadowOpacity: 0.36, shadowRadius: 24 },
+  raidLocatePanelMobile: { left: 10, right: 10, top: 58, width: 'auto' },
+  raidLocateCopy: { flex: 1 },
+  raidLocateEyebrow: { fontSize: 7, fontWeight: '900', letterSpacing: 0.9 },
+  raidLocateTitle: { marginTop: 4, fontSize: 13, fontWeight: '900' },
+  raidLocateReturn: { minHeight: 38, paddingHorizontal: 12, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  raidLocateReturnText: { fontSize: 8, fontWeight: '900' },
   raidCollapsed: { position: 'absolute', right: 0, top: 49, bottom: 82, width: 44, alignItems: 'center', justifyContent: 'center', zIndex: 300 },
   raidCollapsedMobile: { left: 12, right: 12, top: 'auto', bottom: 84, width: 'auto', height: 50, borderRadius: 15, flexDirection: 'row', gap: 8, zIndex: 500 },
   raidCollapsedIcon: { fontSize: 18 },
@@ -540,6 +599,7 @@ const styles = StyleSheet.create({
   rosterTitle: { marginTop: 4, fontSize: 8, lineHeight: 11, fontWeight: '800' },
   rosterBottom: { marginTop: 'auto', paddingTop: 5, flexDirection: 'row' },
   rosterStatus: { flex: 1, fontSize: 6.5, fontWeight: '900' },
+  locateHint: { marginRight: 8, fontSize: 6.5, fontWeight: '900' },
   removeCourse: { fontSize: 6.5, fontWeight: '900' },
   emptyRoster: { paddingVertical: 20, textAlign: 'center', fontSize: 9 },
   availableHeading: { paddingHorizontal: 14, paddingTop: 10, paddingBottom: 6, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
@@ -547,7 +607,7 @@ const styles = StyleSheet.create({
   choiceScroll: { flex: 1 },
   choiceGrid: { padding: 12, paddingTop: 4, paddingBottom: 26, flexDirection: 'row', flexWrap: 'wrap', gap: 8, overflow: 'visible' },
   choiceSlot: { zIndex: 20, elevation: 20 },
-  choice: { minHeight: 134, padding: 10, borderRadius: 13, borderWidth: 2, shadowOpacity: 0.14, shadowRadius: 8 },
+  choice: { minHeight: 148, padding: 10, borderRadius: 13, borderWidth: 2, shadowOpacity: 0.14, shadowRadius: 8 },
   choiceTop: { flexDirection: 'row', alignItems: 'center' },
   choiceCode: { flex: 1, fontSize: 9, fontWeight: '900' },
   choiceUnits: { marginRight: 7, fontSize: 8, fontWeight: '900' },
@@ -555,6 +615,7 @@ const styles = StyleSheet.create({
   choiceDragText: { fontSize: 16, fontWeight: '900' },
   choiceTitle: { marginTop: 5, fontSize: 8.5, lineHeight: 12, fontWeight: '800' },
   choiceField: { marginTop: 4, fontSize: 7, fontWeight: '800' },
+  choiceRating: { marginTop: 5, fontSize: 7.5, fontWeight: '900', letterSpacing: 0.15 },
   choiceUnlocked: { marginTop: 6, fontSize: 7, fontWeight: '900' },
   choiceAdd: { marginTop: 'auto', minHeight: 29, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
   choiceAddText: { fontSize: 7, fontWeight: '900' },

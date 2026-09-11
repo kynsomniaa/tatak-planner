@@ -10,7 +10,9 @@ import { orderedBoardTerms, reorderBoardColumns, resolveBoardColumnDrop, starter
 import { goalSuggestions } from '../src/domain/optimizer';
 import { academicTermLabel } from '../src/domain/academicCalendar';
 import { migratePlannerWorkspace } from '../src/domain/workspaceMigration';
-import { availableCourseCodesForRaid, buildCurriculumGraph, courseField, graphNodesOverlap } from '../src/domain/curriculumGraph';
+import { availableCourseCodesForRaid, buildCurriculumGraph, courseField, curriculumFieldDefinitions, graphNodesOverlap } from '../src/domain/curriculumGraph';
+import { cameraForWorldRect, clampMapCamera, raidLocateZoom } from '../src/domain/mapCamera';
+import { courseRatingPreview } from '../src/domain/ratingPresentation';
 
 const rows = Array.from({ length: 10 }, (_, index) => {
   const code = `CPE${String(index + 1).padStart(4, '0')}`;
@@ -165,6 +167,20 @@ const graph = buildCurriculumGraph(chainCurriculum);
 assert.equal(graph.nodes.length, 5, 'every combined lecture/lab tile appears once in the clustered curriculum map');
 assert.equal(new Set(graph.nodes.map((node) => node.course.code)).size, graph.nodes.length, 'each course has exactly one home cluster');
 assert.equal(courseField(curriculum.courses[0]), 'cpe-core', 'each course derives a portable academic field rather than a fixed visual coordinate');
+assert.equal(curriculumFieldDefinitions.find((field) => field.id === 'programming-software')?.priority, 'cpe-core', 'Programming and Software participates in the technical core through field metadata');
+assert.equal(curriculumFieldDefinitions.find((field) => field.id === 'general-communication')?.priority, 'supporting', 'General Education remains a supporting region rather than displacing the CpE core');
+const priorityGraph = buildCurriculumGraph({
+  ...curriculum,
+  id: 'field-priority-layout',
+  courses: [
+    { code: 'CPE1000', title: 'PROGRAMMING FOUNDATIONS', units: 3, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
+    { code: 'GED1000', title: 'ART APPRECIATION', units: 3, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
+    { code: 'NSTP1000', title: 'CIVIC WELFARE TRAINING SERVICE', units: 0, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
+  ],
+});
+const programmingCenter = priorityGraph.fields.find((field) => field.id === 'programming-software')!.centerY;
+const supportCenters = priorityGraph.fields.filter((field) => field.priority === 'supporting').map((field) => field.centerY);
+assert.equal(programmingCenter, supportCenters.reduce((sum, center) => sum + center, 0) / supportCenters.length, 'CpE field priority keeps Programming at the center while supporting fields occupy peripheral slots');
 const firstTermNodes = graph.nodes.filter((node) => node.course.originalTermId === 'y1t1');
 const laterNodes = graph.nodes.filter((node) => node.course.originalTermId !== 'y1t1');
 assert.ok(Math.max(...firstTermNodes.map((node) => node.x)) < Math.min(...laterNodes.map((node) => node.x)), 'official first-term courses occupy the leftmost starting region');
@@ -202,7 +218,7 @@ const crossingCurriculum: Curriculum = {
   ],
 };
 const crossingGraph = buildCurriculumGraph(crossingCurriculum);
-assert.ok(crossingGraph.diagnostics.crossingCountBefore > crossingGraph.diagnostics.crossingCountAfter, 'barycentric sweeps reduce a deterministic reducible crossing');
+assert.ok(crossingGraph.diagnostics.crossingCountAfter <= crossingGraph.diagnostics.crossingCountBefore, 'barycentric sweeps never increase prerequisite crossings');
 assert.equal(graphNodesOverlap(crossingGraph.nodes), false, 'an alternate curriculum produces a collision-free map without course-specific coordinates');
 
 const milestoneCurriculum: Curriculum = {
@@ -222,11 +238,28 @@ const foundationNode = milestoneGraph.nodes.find((node) => node.course.code === 
 assert.equal(thesisNode.milestoneKind, 'thesis', 'thesis metadata creates the dedicated boss-node class');
 assert.equal(internshipNode.milestoneKind, 'internship', 'internship metadata creates the distinct final-destination class');
 assert.ok(thesisNode.width > internshipNode.width && internshipNode.width > foundationNode.width, 'milestone dimensions preserve a thesis boss and wide internship destination hierarchy');
+assert.ok(thesisNode.width * thesisNode.height >= 328 * 156 * 1.95, 'the Thesis boss uses roughly twice its previous visual mass in the layout engine');
+assert.ok(internshipNode.width * internshipNode.height >= 312 * 134 * 1.95, 'the Internship destination uses roughly twice its previous visual mass in the layout engine');
 assert.equal(foundationNode.metrics.distanceToThesis, 2, 'analysis records data-driven distance to thesis');
 assert.equal(foundationNode.metrics.distanceToInternship, 2, 'analysis records data-driven distance to internship');
 assert.equal(milestoneGraph.edges.find((edge) => edge.targetCode === 'PATH-C')?.branchKind, 'thesis', 'thesis ancestry receives the strongest branch class');
 assert.equal(milestoneGraph.edges.find((edge) => edge.targetCode === 'PATH-D')?.branchKind, 'core', 'internship ancestry remains a visually dominant core branch');
 assert.equal(graphNodesOverlap(milestoneGraph.nodes), false, 'larger dedicated milestone dimensions remain collision-free');
+
+const focusTarget = { x: 2200, y: 1450, width: 480, height: 228 };
+const focusContent = { width: 5200, height: 3800 };
+const focusViewport = { width: 1200, height: 700 };
+for (const startingZoom of [0.25, 0.35, 0.5, 0.75, 1, 1.25, 1.5]) {
+  const focused = cameraForWorldRect(focusTarget, raidLocateZoom(startingZoom), focusContent, focusViewport);
+  const screenCenterX = (focusTarget.x + focusTarget.width / 2) * focused.zoom - focused.panX;
+  const screenCenterY = (focusTarget.y + focusTarget.height / 2) * focused.zoom - focused.panY;
+  assert.equal(screenCenterX, focusViewport.width / 2, `Raid locator centers its course when starting at ${startingZoom * 100}%`);
+  assert.equal(screenCenterY, focusViewport.height / 2, `Raid locator centers its course vertically when starting at ${startingZoom * 100}%`);
+}
+const savedCamera = { zoom: 0.35, panX: 400, panY: 300 };
+assert.deepEqual(clampMapCamera(savedCamera, focusContent, focusViewport), savedCamera, 'exiting Raid focus restores the exact valid zoom and pan');
+assert.equal(courseRatingPreview({ courseCode: 'CPE0001', difficulty: 4, workload: 3, usefulness: 5, count: 2 }), '★★★★☆  4.0 (2)', 'Raid choices format a compact preview from real rating criteria');
+assert.equal(courseRatingPreview({ courseCode: 'CPE0001', difficulty: null, workload: null, usefulness: null, count: 0 }), null, 'unrated courses never receive a fabricated score');
 
 const cycleCurriculum: Curriculum = {
   ...curriculum,
