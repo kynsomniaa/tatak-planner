@@ -18,6 +18,8 @@ export interface AppColors {
   danger: string;
   dangerSoft: string;
   blue: string;
+  active: string;
+  activeSoft: string;
   arrowGed: string;
   arrowCoe: string;
   arrowCpe: string;
@@ -29,6 +31,7 @@ export const palettes: Record<Exclude<ThemePalette, 'system'>, AppColors> = {
     gold: '#F2B94B', ink: '#18201D', muted: '#66736D', surface: '#FFFFFF', canvas: '#F3F6F4',
     border: '#DCE4DF', warning: '#A85D00', warningSoft: '#FFF0D5', danger: '#B42318',
     dangerSoft: '#FEE4E2', blue: '#2366C4',
+    active: '#6D4BD1', activeSoft: '#EEE8FF',
     arrowGed: '#6E8F82', arrowCoe: '#E99A16', arrowCpe: '#00A85A',
   },
   dark: {
@@ -36,6 +39,7 @@ export const palettes: Record<Exclude<ThemePalette, 'system'>, AppColors> = {
     gold: '#E6B955', ink: '#F2F5F3', muted: '#AAB5AF', surface: '#1B2023', canvas: '#0E1113',
     border: '#343C40', warning: '#F2AF54', warningSoft: '#3A2A16', danger: '#F08B82',
     dangerSoft: '#3B2020', blue: '#78A9EF',
+    active: '#B8A0FF', activeSoft: '#30284A',
     arrowGed: '#83918B', arrowCoe: '#FFD05A', arrowCpe: '#72F0AE',
   },
   'black-maroon': {
@@ -43,6 +47,7 @@ export const palettes: Record<Exclude<ThemePalette, 'system'>, AppColors> = {
     gold: '#D5AA56', ink: '#FAF4F6', muted: '#B9AAB0', surface: '#191214', canvas: '#080607',
     border: '#3B2830', warning: '#E9A44B', warningSoft: '#382413', danger: '#F07C78',
     dangerSoft: '#3A191C', blue: '#8AAEF2',
+    active: '#C58BFF', activeSoft: '#342044',
     arrowGed: '#947580', arrowCoe: '#F5A33A', arrowCpe: '#FF477E',
   },
   'black-orange': {
@@ -50,6 +55,7 @@ export const palettes: Record<Exclude<ThemePalette, 'system'>, AppColors> = {
     gold: '#FF9E3D', ink: '#FFF7F0', muted: '#C3B2A6', surface: '#1B1511', canvas: '#090705',
     border: '#403027', warning: '#FFAD52', warningSoft: '#3D2713', danger: '#FF8077',
     dangerSoft: '#3E1C19', blue: '#86B5F8',
+    active: '#45B7FF', activeSoft: '#132C3E',
     arrowGed: '#947E70', arrowCoe: '#FFC247', arrowCpe: '#FF4D00',
   },
   'pastel-pink': {
@@ -57,6 +63,7 @@ export const palettes: Record<Exclude<ThemePalette, 'system'>, AppColors> = {
     gold: '#D7A7EA', ink: '#3C2530', muted: '#7B6570', surface: '#FFF9FC', canvas: '#FFF0F6',
     border: '#EAC9D8', warning: '#995A12', warningSoft: '#FFE8CF', danger: '#B83E5D',
     dangerSoft: '#FFDCE5', blue: '#6A75C9',
+    active: '#7559D9', activeSoft: '#ECE7FF',
     arrowGed: '#A57D91', arrowCoe: '#7567E8', arrowCpe: '#F02C80',
   },
 };

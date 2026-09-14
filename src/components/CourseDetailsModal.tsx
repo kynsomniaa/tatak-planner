@@ -11,6 +11,7 @@ import {
 } from 'react-native';
 import { colors, contrastText, useAppTheme } from '../theme';
 import { Course, CourseRatingSummary, CourseStatus, CurriculumTerm } from '../types';
+import { StarRating } from './StarRating';
 import { PrimaryButton, SectionTitle } from './ui';
 
 const statuses: CourseStatus[] = ['passed', 'active', 'pending', 'retake'];
@@ -95,9 +96,9 @@ export function CourseDetailsModal({
             <SectionTitle title="Community rating" />
             {ratingSummary && ratingSummary.count > 0 ? (
               <View style={styles.ratingGrid}>
-                <Fact label="Difficulty" value={`${ratingSummary.difficulty?.toFixed(1)} / 5`} />
-                <Fact label="Workload" value={`${ratingSummary.workload?.toFixed(1)} / 5`} />
-                <Fact label="Usefulness" value={`${ratingSummary.usefulness?.toFixed(1)} / 5`} />
+                <RatingCriterion label="Difficulty" value={ratingSummary.difficulty} />
+                <RatingCriterion label="Workload" value={ratingSummary.workload} />
+                <RatingCriterion label="Usefulness" value={ratingSummary.usefulness} />
                 <Text style={[styles.ratingCount, { color: theme.muted }]}>{ratingSummary.count} student rating{ratingSummary.count === 1 ? '' : 's'}</Text>
               </View>
             ) : <Text style={[styles.emptyRating, { color: theme.muted }]}>No community ratings yet.</Text>}
@@ -123,9 +124,12 @@ export function CourseDetailsModal({
                   <Pressable
                     key={option}
                     onPress={() => onStatusChange(option)}
-                    style={[styles.statusChoice, { backgroundColor: theme.surface, borderColor: theme.border }, status === option && styles.statusSelected, status === option && { backgroundColor: theme.green800, borderColor: theme.green800 }]}
+                    style={[styles.statusChoice, { backgroundColor: theme.surface, borderColor: theme.border }, status === option && styles.statusSelected, status === option && {
+                      backgroundColor: option === 'active' ? theme.activeSoft : option === 'passed' ? theme.green800 : option === 'retake' ? theme.dangerSoft : theme.canvas,
+                      borderColor: option === 'active' ? theme.active : option === 'passed' ? theme.green800 : option === 'retake' ? theme.danger : theme.muted,
+                    }]}
                   >
-                    <Text style={[styles.statusChoiceText, { color: status === option ? contrastText(theme.green800) : theme.ink }]}>
+                    <Text style={[styles.statusChoiceText, { color: status === option ? (option === 'active' ? theme.active : option === 'passed' ? contrastText(theme.green800) : option === 'retake' ? theme.danger : theme.ink) : theme.ink }]}>
                       {option[0].toUpperCase() + option.slice(1)}
                     </Text>
                   </Pressable>
@@ -238,6 +242,16 @@ function Fact({ label, value }: { label: string; value: string }) {
   );
 }
 
+function RatingCriterion({ label, value }: { label: string; value: number | null }) {
+  const theme = useAppTheme();
+  return (
+    <View style={[styles.ratingCriterion, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <Text style={[styles.ratingCriterionLabel, { color: theme.muted }]}>{label}</Text>
+      {value === null ? <Text style={[styles.emptyRating, { color: theme.muted }]}>No ratings yet</Text> : <StarRating value={value} size="sm" label={label} valueColor={theme.green700} />}
+    </View>
+  );
+}
+
 function Rule({ label, values, empty }: { label: string; values: string[]; empty: string }) {
   const unique = [...new Set(values)];
   const theme = useAppTheme();
@@ -272,6 +286,8 @@ const styles = StyleSheet.create({
   ruleValue: { marginTop: 3, color: colors.ink, fontSize: 14, fontWeight: '800' },
   availability: { marginTop: 10, color: colors.muted, fontSize: 11, fontStyle: 'italic' },
   ratingGrid: { gap: 7 },
+  ratingCriterion: { padding: 13, borderRadius: 13, borderWidth: 1 },
+  ratingCriterionLabel: { marginBottom: 5, fontSize: 11, fontWeight: '700' },
   ratingCount: { marginTop: 3, color: colors.muted, fontSize: 10, fontWeight: '700' },
   emptyRating: { color: colors.muted, fontSize: 12, fontStyle: 'italic' },
   gradeHelp: { marginBottom: 9, color: colors.muted, fontSize: 11, lineHeight: 17 },

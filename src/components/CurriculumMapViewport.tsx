@@ -29,6 +29,7 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
   const theme = useAppTheme();
   const horizontalRef = useRef<ScrollView>(null);
   const verticalRef = useRef<ScrollView>(null);
+  const wrapperRef = useRef<View>(null);
   const frameRef = useRef<View>(null);
   const scrollX = useRef(0);
   const scrollY = useRef(0);
@@ -36,13 +37,31 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
   const panStartY = useRef(0);
   const webPan = useRef<{ pointerId: number; clientX: number; clientY: number; scrollX: number; scrollY: number; moved: boolean } | null>(null);
   const pendingFocus = useRef<{ request: MapFocusRequest; zoom: number } | null>(null);
+  const handledFocusToken = useRef<number | null>(null);
   const onCameraChangeRef = useRef(onCameraChange);
   const lastWheelAt = useRef(0);
   const [zoom, setZoom] = useState(0.72);
   const [viewport, setViewport] = useState({ width: 0, height: 0 });
   const [panning, setPanning] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
 
   useEffect(() => { onCameraChangeRef.current = onCameraChange; }, [onCameraChange]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+    const onFullscreenChange = () => setFullscreen(Boolean(document.fullscreenElement));
+    const onKeyDown = (event: KeyboardEvent) => {
+      // Browsers exit native fullscreen themselves. This also closes the CSS
+      // fallback used by embedded/local preview browsers.
+      if (event.key === 'Escape' && fullscreen) setFullscreen(false);
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [fullscreen]);
 
   const reportCamera = (cameraZoom = zoom, panX = scrollX.current, panY = scrollY.current) => {
     onCameraChangeRef.current?.({ zoom: cameraZoom, panX, panY });
@@ -82,6 +101,33 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
     verticalRef.current?.scrollTo({ y: 0, animated: true });
     reportCamera(nextZoom, 0, 0);
   };
+  const toggleFullscreen = async () => {
+    if (Platform.OS !== 'web') {
+      setFullscreen((value) => !value);
+      return;
+    }
+    const node = wrapperRef.current as unknown as HTMLElement | null;
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (node?.requestFullscreen) await node.requestFullscreen();
+      else setFullscreen((value) => !value);
+    } catch {
+      setFullscreen((value) => !value);
+    }
+  };
+
+  useEffect(() => {
+    if (viewport.width === 0 || viewport.height === 0) return;
+    requestAnimationFrame(() => {
+      const maxX = Math.max(0, contentWidth * zoom - viewport.width);
+      const maxY = Math.max(0, contentHeight * zoom - viewport.height);
+      const x = Math.max(0, Math.min(maxX, scrollX.current));
+      const y = Math.max(0, Math.min(maxY, scrollY.current));
+      horizontalRef.current?.scrollTo({ x, animated: false });
+      verticalRef.current?.scrollTo({ y, animated: false });
+      reportCamera(zoom, x, y);
+    });
+  }, [fullscreen, viewport.width, viewport.height]);
 
   const canPan = (event: unknown) => {
     if (Platform.OS !== 'web') return true;
@@ -115,6 +161,8 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
 
   useEffect(() => {
     if (!focus || viewport.width === 0 || viewport.height === 0) return;
+    if (handledFocusToken.current === focus.token) return;
+    handledFocusToken.current = focus.token;
     const nextZoom = clampExactZoom(focus.camera?.zoom ?? focus.zoom ?? Math.max(1, zoom));
     pendingFocus.current = { request: focus, zoom: nextZoom };
     if (nextZoom !== zoom) setZoom(nextZoom);
@@ -216,13 +264,14 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
   const centeredOffsetX = Math.max(0, (viewport.width - contentWidth * zoom) / 2);
   const centeredOffsetY = Math.max(0, (viewport.height - contentHeight * zoom) / 2);
   return (
-    <View style={[styles.wrapper, dragging && styles.wrapperDragging]}>
+    <View ref={wrapperRef} style={[styles.wrapper, { backgroundColor: theme.canvas }, fullscreen && styles.fullscreen, dragging && styles.wrapperDragging]}>
       <View style={[styles.controls, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <Text style={[styles.handHint, { color: panning ? theme.green700 : theme.muted }]}>{panning ? '✋ Roaming map…' : 'Drag empty space to roam · Ctrl/⌘ + wheel to zoom'}</Text>
         <Pressable onPress={() => applyZoom(zoom - 0.1)} style={[styles.control, { backgroundColor: theme.canvas }]}><Text style={[styles.controlText, { color: theme.ink }]}>−</Text></Pressable>
         <Text style={[styles.zoom, { color: theme.ink }]}>{Math.round(zoom * 100)}%</Text>
         <Pressable onPress={() => applyZoom(zoom + 0.1)} style={[styles.control, { backgroundColor: theme.canvas }]}><Text style={[styles.controlText, { color: theme.ink }]}>＋</Text></Pressable>
         <Pressable onPress={fit} style={[styles.fit, { backgroundColor: theme.green100 }]}><Text style={[styles.fitText, { color: contrastText(theme.green100, '#FFFFFF', theme.green900) }]}>Fit map</Text></Pressable>
+        <Pressable accessibilityLabel={fullscreen ? 'Exit Full Screen' : 'Full Screen'} onPress={() => { void toggleFullscreen(); }} style={[styles.fullscreenButton, { backgroundColor: fullscreen ? theme.gold : theme.green900 }]}><Text style={[styles.fullscreenText, { color: fullscreen ? contrastText(theme.gold) : contrastText(theme.green900) }]}>{fullscreen ? '↙ Exit Full Screen' : '⛶ Full Screen'}</Text></Pressable>
       </View>
       <View ref={frameRef} style={[styles.frame, { cursor: panning ? 'grabbing' : 'grab' } as never, dragging && styles.frameDragging]} onLayout={(event: LayoutChangeEvent) => setViewport({ width: event.nativeEvent.layout.width, height: event.nativeEvent.layout.height })}>
         <ScrollView style={dragging && styles.frameDragging} ref={verticalRef} nestedScrollEnabled showsVerticalScrollIndicator contentContainerStyle={{ minHeight: scaledHeight }} onScroll={(event) => { scrollY.current = event.nativeEvent.contentOffset.y; reportCamera(zoom, scrollX.current, scrollY.current); }} scrollEventThrottle={32}>
@@ -241,6 +290,7 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
 
 const styles = StyleSheet.create({
   wrapper: { flex: 1, minWidth: 0 },
+  fullscreen: { position: 'fixed' as never, left: 0, right: 0, top: 0, bottom: 0, zIndex: 10000, elevation: 10000 },
   wrapperDragging: { zIndex: 500, elevation: 500, overflow: 'visible' },
   controls: { minHeight: 48, paddingHorizontal: 10, borderTopWidth: 1, borderBottomWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 6 },
   handHint: { flex: 1, fontSize: 9, fontWeight: '800' },
@@ -249,6 +299,8 @@ const styles = StyleSheet.create({
   zoom: { width: 45, textAlign: 'center', fontSize: 9, fontWeight: '900' },
   fit: { minHeight: 32, paddingHorizontal: 10, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
   fitText: { fontSize: 9, fontWeight: '900' },
+  fullscreenButton: { minHeight: 32, paddingHorizontal: 11, borderRadius: 9, alignItems: 'center', justifyContent: 'center' },
+  fullscreenText: { fontSize: 9, fontWeight: '900' },
   frame: { flex: 1, overflow: 'hidden' },
   frameDragging: { overflow: 'visible' },
 });

@@ -34,7 +34,7 @@ export function SettingsScreen({
     <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.canvas }]}>
       <Text style={[styles.eyebrow, { color: theme.green700 }]}>SETTINGS</Text>
       <Text style={[styles.title, { color: theme.ink }]}>Your planner</Text>
-      <Text style={[styles.subtitle, { color: theme.muted }]}>Account, appearance, curriculum source, and integration status.</Text>
+      <Text style={[styles.subtitle, { color: theme.muted }]}>Account, appearance, program curriculum, and integration status.</Text>
 
       <View style={[styles.profile, { backgroundColor: theme.green900 }]}>
         <View style={[styles.avatar, { backgroundColor: theme.gold }]}><Text style={[styles.avatarText, { color: contrastText(theme.gold) }]}>{session.username[0]?.toUpperCase()}</Text></View>
@@ -76,13 +76,12 @@ export function SettingsScreen({
         })}
       </View>
 
-      <Text style={[styles.sectionTitle, { color: theme.ink }]}>Curriculum source</Text>
+      <Text style={[styles.sectionTitle, { color: theme.ink }]}>Program curriculum</Text>
       <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <InfoRow label="School" value={curriculum?.school ?? '—'} />
         <InfoRow label="Program" value={curriculum?.program ?? '—'} />
-        <InfoRow label="File" value={curriculum?.sourceFileName ?? '—'} />
-        <InfoRow label="Fingerprint" value={curriculum?.fingerprint ?? '—'} />
-        <InfoRow label="Imported" value={curriculum ? new Date(curriculum.importedAt).toLocaleString() : '—'} last />
+        <InfoRow label="Source" value={curriculum?.sourceFileName ?? '—'} />
+        <InfoRow label="Catalog version" value={curriculum?.fingerprint ?? '—'} last />
       </View>
 
       <Text style={[styles.sectionTitle, { color: theme.ink }]}>Connections</Text>
@@ -92,15 +91,15 @@ export function SettingsScreen({
       </View>
 
       <PrimaryButton
-        label="Replace curriculum HTML"
+        label="Choose a different program"
         tone="light"
         onPress={() =>
           Alert.alert(
-            'Replace curriculum?',
-            'This clears the current plan on this account. Your SOLAR file will be imported as a new blueprint.',
+            'Choose another program?',
+            'This clears the current academic plan on this account and returns to program selection.',
             [
               { text: 'Cancel', style: 'cancel' },
-              { text: 'Replace', style: 'destructive', onPress: onReplaceCurriculum },
+              { text: 'Continue', style: 'destructive', onPress: onReplaceCurriculum },
             ],
           )
         }

@@ -32,6 +32,10 @@ export interface CurriculumGraphMetrics {
   downstreamDepth: number;
   bridgeScore: number;
   milestoneWeight: number;
+  foundationalWeight: number;
+  foundationInfluence: number;
+  /** Structural placement score for metadata-designated backbone courses. */
+  foundationCentrality: number;
   isThesisAncestor: boolean;
   distanceToThesis: number | null;
   isInternshipAncestor: boolean;
@@ -59,6 +63,7 @@ export interface CurriculumGraphNode {
   importanceScore: number;
   metrics: CurriculumGraphMetrics;
   difficult: boolean;
+  challenging: boolean;
   rank: number;
   layoutRank: number;
   x: number;
@@ -100,6 +105,12 @@ export interface CurriculumGraphLayout {
   fields: CurriculumGraphField[];
   edges: CurriculumGraphEdge[];
   startingRegion: CurriculumGraphRect;
+  foundationBackbone: {
+    centerY: number;
+    corridorHalfHeight: number;
+    nodeCodes: string[];
+    rankExpansion: Record<string, number>;
+  };
   validationErrors: string[];
   diagnostics: {
     cycles: string[][];
@@ -179,6 +190,17 @@ export function buildCurriculumGraph(curriculum: Curriculum, ratings: CourseRati
   const termOrder = new Map(curriculum.terms.map((term) => [term.id, term.order]));
   const firstTermId = [...curriculum.terms].sort((left, right) => left.order - right.order)[0]?.id;
   const analysis = analyzeCurriculumGraph(courses, edges, fields, termOrder);
+  const difficulty = new Map<string, { total: number; count: number }>();
+  ratings.filter((rating) => !rating.hidden).forEach((rating) => {
+    const current = difficulty.get(rating.courseCode) ?? { total: 0, count: 0 };
+    current.total += rating.difficulty;
+    current.count += 1;
+    difficulty.set(rating.courseCode, current);
+  });
+  const difficultCourseCodes = new Set([
+    ...courses.map((course) => course.challenging ? course.code : '').filter(Boolean),
+    ...[...difficulty].filter(([, summary]) => summary.count >= 5 && summary.total / summary.count >= 4).map(([code]) => code),
+  ]);
   const prominentEdges = edges.map((edge) => {
     if (edge.kind === 'corequisite') return { ...edge, prominence: 0.42, branchKind: 'normal' as const };
     const source = analysis.courses.get(edge.sourceCode);
@@ -195,7 +217,8 @@ export function buildCurriculumGraph(curriculum: Curriculum, ratings: CourseRati
     const coreFields: CurriculumFieldId[] = ['math-physics', 'programming-software', 'circuits-electronics', 'cpe-core', 'hardware-embedded', 'networks-systems', 'design-thesis'];
     const structural = Math.min(1, Math.max(source.importanceScore, target.importanceScore) * 0.62
       + Math.max(source.metrics.bridgeScore, target.metrics.bridgeScore) * 0.18
-      + Math.min(1, source.metrics.downstreamCount / 12) * 0.2);
+      + Math.min(1, source.metrics.downstreamCount / 12) * 0.16
+      + Math.max(source.metrics.foundationalWeight, source.metrics.foundationInfluence, target.metrics.foundationInfluence) * 0.18);
     if (thesisStep) {
       const targetDistance = target.metrics.distanceToThesis ?? 0;
       const proximity = 1 / (1 + Math.max(0, targetDistance) * 0.22);
@@ -212,18 +235,7 @@ export function buildCurriculumGraph(curriculum: Curriculum, ratings: CourseRati
     }
     return { ...edge, branchKind: 'normal' as const, prominence: Math.max(0.34, structural) };
   });
-  const layout = calculateCurriculumLayout(analysis, prominentEdges, curriculumFieldDefinitions, termOrder, firstTermId);
-  const difficulty = new Map<string, { total: number; count: number }>();
-  ratings.filter((rating) => !rating.hidden).forEach((rating) => {
-    const current = difficulty.get(rating.courseCode) ?? { total: 0, count: 0 };
-    current.total += rating.difficulty;
-    current.count += 1;
-    difficulty.set(rating.courseCode, current);
-  });
-  layout.nodes.forEach((node) => {
-    const summary = difficulty.get(node.course.code);
-    node.difficult = Boolean(summary && summary.count >= 5 && summary.total / summary.count >= 4);
-  });
+  const layout = calculateCurriculumLayout(analysis, prominentEdges, curriculumFieldDefinitions, termOrder, firstTermId, difficultCourseCodes);
   return {
     ...layout,
     validationErrors: analysis.validationErrors,

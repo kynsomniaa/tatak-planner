@@ -45,7 +45,7 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: App
         <Text style={styles.eyebrow}>FEU TECH STUDENT PLANNER</Text>
         <Text style={styles.title}>Build the route to your degree.</Text>
         <Text style={styles.subtitle}>
-          Import your SOLAR curriculum, plan each trimester, and keep every prerequisite chain valid.
+          Choose your FEU Tech program, map your progress, and keep every prerequisite chain valid.
         </Text>
 
         <View style={styles.card}>

@@ -1,11 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { colors, contrastText, useAppTheme } from '../theme';
-import { Course, CourseStatus, RetakeAttempt, StudentWorkspace } from '../types';
-import { dependentCourseCodes, plannerTerms, termGwa, updateCourseBundleStatus, updateCourseGrade, updateRetakeAttempt } from '../domain/planner';
+import { Course, CourseStatus, CourseVisualState, RetakeAttempt, StudentWorkspace } from '../types';
+import { dependentCourseCodes, plannerTerms, termGwa, updateCourseGrade, updateRetakeAttempt } from '../domain/planner';
 import { courseBundleCodes, visibleCurriculumCourses } from '../domain/academicSetup';
 import { CourseFilter, courseDepartment, courseFilters } from '../domain/coursePresentation';
 import { CourseDetailsModal } from './CourseDetailsModal';
+import { applyWorkspaceProgressStatus, courseVisualState, ProgressValidationError } from '../domain/academicProgress';
 
 const statusOrder: Record<CourseStatus, number> = { active: 0, retake: 1, pending: 2, passed: 3 };
 const nextStatus = (status: CourseStatus): CourseStatus => status === 'pending' ? 'active' : status === 'active' ? 'passed' : status === 'retake' ? 'active' : 'pending';
@@ -19,6 +20,7 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
   const [showGrades, setShowGrades] = useState(false);
   const [gradeTermId, setGradeTermId] = useState(workspace.academicProfile?.currentTermId ?? '');
   const [selectedCourse, setSelectedCourse] = useState<Course | null>(null);
+  const [progressError, setProgressError] = useState<ProgressValidationError | null>(null);
   if (!curriculum) return null;
 
   const visible = visibleCurriculumCourses(curriculum);
@@ -44,11 +46,21 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
     return next;
   });
 
+  const changeStatus = (course: Course, status: CourseStatus) => {
+    const result = applyWorkspaceProgressStatus(workspace, course.code, status);
+    if (!result.ok) {
+      setProgressError(result.error ?? null);
+      return;
+    }
+    setProgressError(null);
+    onChange(result.value);
+  };
+
   return (
     <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.canvas }]}>
       <Text style={[styles.eyebrow, { color: theme.green700 }]}>PROGRESS & GRADES</Text>
       <Text style={[styles.title, { color: theme.ink }]}>Keep your academic record current</Text>
-      <Text style={[styles.subtitle, { color: theme.muted }]}>Tap a course tile to move it through Pending, Active, and Passed. Use the info button or long-press for complete details.</Text>
+      <Text style={[styles.subtitle, { color: theme.muted }]}>Tap a course tile to move it through Pending, Active, and Passed. Active and Passed always require completed prerequisites.</Text>
 
       <View style={[styles.progressCard, { backgroundColor: theme.green900 }]}>
         <View style={styles.progressCopy}><Text style={[styles.progressValue, { color: contrastText(theme.green900) }]}>{passedUnits}</Text><Text style={[styles.progressLabel, { color: contrastText(theme.green900) }]}>of {totalUnits} units passed</Text></View>
@@ -107,9 +119,10 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
                   <Text style={[styles.termTitle, { color: theme.muted }]}>TERM {term.term}</Text>
                   <View style={styles.courseGrid}>
                     {termCourses.map((course) => (
-                      <ProgressTile key={course.code} course={course} status={workspace.statuses[course.code] ?? 'pending'} onCycle={() => onChange(updateCourseBundleStatus(workspace, course.code, nextStatus(workspace.statuses[course.code] ?? 'pending')))} onDetails={() => setSelectedCourse(course)} />
+                      <ProgressTile key={course.code} course={course} status={workspace.statuses[course.code] ?? 'pending'} visualState={courseVisualState(workspace, course.code)} onCycle={() => changeStatus(course, nextStatus(workspace.statuses[course.code] ?? 'pending'))} onDetails={() => setSelectedCourse(course)} />
                     ))}
                   </View>
+                  {progressError && termCourses.some((course) => course.code === progressError.courseCode) && <ProgressError error={progressError} onDismiss={() => setProgressError(null)} />}
                 </View>
               );
             })}
@@ -124,7 +137,7 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
         currentTermId={selectedCourse ? workspace.plan[selectedCourse.code] ?? selectedCourse.originalTermId : ''}
         visible={Boolean(selectedCourse)}
         onClose={() => setSelectedCourse(null)}
-        onStatusChange={(status) => selectedCourse && onChange(updateCourseBundleStatus(workspace, selectedCourse.code, status))}
+        onStatusChange={(status) => selectedCourse && changeStatus(selectedCourse, status)}
         gradeEntries={selectedCourse ? courseBundleCodes(curriculum, selectedCourse.code).map((code) => ({ code, title: byCode.get(code)?.title ?? code, units: byCode.get(code)?.units ?? 0, value: workspace.grades?.[code] })) : []}
         onGradeChange={(code, grade) => onChange(updateCourseGrade(workspace, code, grade))}
         onMove={() => undefined}
@@ -135,17 +148,23 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
   );
 }
 
-function ProgressTile({ course, status, onCycle, onDetails }: { course: Course; status: CourseStatus; onCycle: () => void; onDetails: () => void }) {
+function ProgressTile({ course, status, visualState, onCycle, onDetails }: { course: Course; status: CourseStatus; visualState: CourseVisualState; onCycle: () => void; onDetails: () => void }) {
   const theme = useAppTheme();
-  const label = status === 'passed' ? '✓ PASSED' : status === 'active' ? '● ACTIVE' : status === 'retake' ? '↻ RETAKE' : 'PENDING';
-  const accent = status === 'passed' || status === 'active' ? theme.green700 : status === 'retake' ? theme.danger : theme.muted;
+  const label = status === 'retake' ? '↻ RETAKE' : visualState === 'passed' ? '✓ PASSED' : visualState === 'active' ? '● ACTIVE' : visualState === 'planned' ? '◇ PLANNED' : visualState === 'available' ? '✦ AVAILABLE' : 'LOCKED';
+  const accent = status === 'retake' ? theme.danger : visualState === 'passed' ? theme.green700 : visualState === 'active' ? theme.active : visualState === 'planned' ? theme.gold : visualState === 'available' ? theme.arrowCpe : theme.muted;
+  const background = status === 'retake' ? theme.dangerSoft : visualState === 'passed' ? theme.green100 : visualState === 'active' ? theme.activeSoft : visualState === 'planned' ? theme.warningSoft : theme.canvas;
   return (
-    <Pressable onPress={onCycle} onLongPress={onDetails} delayLongPress={420} style={({ pressed }) => [styles.progressTile, { backgroundColor: status === 'passed' || status === 'active' ? theme.green100 : theme.canvas, borderColor: accent }, pressed && styles.pressed]}>
+    <Pressable onPress={onCycle} onLongPress={onDetails} delayLongPress={420} style={({ pressed }) => [styles.progressTile, { backgroundColor: background, borderColor: accent, shadowColor: accent }, status === 'active' && styles.activeTile, pressed && styles.pressed]}>
       <View style={styles.tileTop}><Text style={[styles.code, { color: accent }]}>{course.code}</Text><Pressable onPress={(event) => { event.stopPropagation(); onDetails(); }} style={[styles.info, { backgroundColor: theme.surface }]}><Text style={[styles.infoText, { color: theme.green700 }]}>i</Text></Pressable></View>
       <Text numberOfLines={2} style={[styles.courseTitle, { color: theme.ink }]}>{course.title}</Text>
       <Text style={[styles.statusLabel, { color: accent }]}>{label}</Text>
     </Pressable>
   );
+}
+
+function ProgressError({ error, onDismiss }: { error: ProgressValidationError; onDismiss: () => void }) {
+  const theme = useAppTheme();
+  return <View accessibilityRole="alert" style={[styles.progressError, { backgroundColor: theme.dangerSoft, borderColor: theme.danger }]}><View style={styles.progressErrorCopy}><Text style={[styles.progressErrorTitle, { color: theme.danger }]}>⚠ Prerequisite blocked</Text><Text style={[styles.progressErrorMessage, { color: theme.ink }]}>{error.message}</Text></View><Pressable onPress={onDismiss} style={styles.progressErrorClose}><Text style={[styles.progressErrorCloseText, { color: theme.danger }]}>×</Text></Pressable></View>;
 }
 
 function GradeBook({ workspace, onChange, termId, onTermChange }: { workspace: StudentWorkspace; onChange: (workspace: StudentWorkspace) => void; termId: string; onTermChange: (termId: string) => void }) {
@@ -246,6 +265,7 @@ const styles = StyleSheet.create({
   termTitle: { marginBottom: 8, fontSize: 9, fontWeight: '900', letterSpacing: 0.8 },
   courseGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   progressTile: { width: 220, minHeight: 112, padding: 12, borderRadius: 14, borderWidth: 1.5 },
+  activeTile: { borderWidth: 3, shadowOpacity: 0.22, shadowRadius: 10, elevation: 6 },
   pressed: { opacity: 0.72, transform: [{ scale: 0.99 }] },
   tileTop: { flexDirection: 'row', alignItems: 'center' },
   code: { flex: 1, fontSize: 11, fontWeight: '900' },
@@ -253,4 +273,10 @@ const styles = StyleSheet.create({
   infoText: { fontSize: 12, fontWeight: '900' },
   courseTitle: { marginTop: 7, fontSize: 12, lineHeight: 17, fontWeight: '800' },
   statusLabel: { marginTop: 'auto', paddingTop: 9, fontSize: 9, fontWeight: '900', letterSpacing: 0.5 },
+  progressError: { marginTop: 10, padding: 12, borderRadius: 13, borderWidth: 2, flexDirection: 'row' },
+  progressErrorCopy: { flex: 1 },
+  progressErrorTitle: { fontSize: 11, fontWeight: '900' },
+  progressErrorMessage: { marginTop: 5, fontSize: 10, lineHeight: 15, fontWeight: '700' },
+  progressErrorClose: { paddingHorizontal: 8 },
+  progressErrorCloseText: { fontSize: 18, fontWeight: '900' },
 });

@@ -1,145 +1,78 @@
 import React, { useState } from 'react';
-import { Alert, Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
-import * as DocumentPicker from 'expo-document-picker';
-import { File as ExpoFile } from 'expo-file-system';
-import { colors } from '../theme';
+import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { colors, contrastText, useAppTheme } from '../theme';
 import { Curriculum, StudentWorkspace } from '../types';
-import { parseFeuCurriculumHtml } from '../parser/feuCurriculumParser';
-import { PrimaryButton } from './ui';
+import { curriculumForProgram, supportedPrograms } from '../data/supportedPrograms';
 import { AcademicSetupScreen } from './AcademicSetupScreen';
 
+/** Kept under the historical filename so saved navigation imports stay stable. */
 export function ImportScreen({ onImported, onBackToLogin }: { onImported: (workspace: StudentWorkspace) => void; onBackToLogin: () => void }) {
-  const [preview, setPreview] = useState<Curriculum | null>(null);
-  const [warnings, setWarnings] = useState<string[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [settingUp, setSettingUp] = useState(false);
+  const theme = useAppTheme();
+  const [curriculum, setCurriculum] = useState<Curriculum | null>(null);
 
-  const chooseFile = async () => {
-    setLoading(true);
-    try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['text/html', 'application/xhtml+xml', '*/*'],
-        copyToCacheDirectory: true,
-        multiple: false,
-      });
-      if (result.canceled) return;
-      const asset = result.assets[0];
-      if (!/\.html?$/i.test(asset.name)) throw new Error('Choose an .html file exported from SOLAR.');
-      const html = asset.file ? await asset.file.text() : await new ExpoFile(asset.uri).text();
-      const parsed = parseFeuCurriculumHtml(html, asset.name);
-      setPreview(parsed.curriculum);
-      setWarnings(parsed.warnings);
-      setSettingUp(false);
-    } catch (error) {
-      Alert.alert('Import failed', String((error as Error).message));
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  if (preview && settingUp) {
-    return (
-      <AcademicSetupScreen
-        curriculum={preview}
-        onBack={() => setSettingUp(false)}
-        onComplete={onImported}
-      />
-    );
+  if (curriculum) {
+    return <AcademicSetupScreen curriculum={curriculum} onBack={() => setCurriculum(null)} onComplete={onImported} />;
   }
 
   return (
-    <SafeAreaView style={styles.safe}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.canvas }]}>
       <ScrollView contentContainerStyle={styles.page}>
-        <Pressable onPress={onBackToLogin} style={styles.backButton}><Text style={styles.backText}>← Back to login</Text></Pressable>
-        <View style={styles.step}><Text style={styles.stepText}>1 OF 2</Text></View>
-        <Text style={styles.title}>Import your official curriculum</Text>
-        <Text style={styles.subtitle}>
-          In SOLAR, open Program Curriculum and save the page as an HTML file. CpE Pathfinder reads the table only—it never runs scripts from the file.
-        </Text>
+        <Pressable onPress={onBackToLogin} style={styles.backButton}><Text style={[styles.backText, { color: theme.green700 }]}>← Back to login</Text></Pressable>
+        <View style={[styles.step, { backgroundColor: theme.green100 }]}><Text style={[styles.stepText, { color: contrastText(theme.green100, '#FFFFFF', theme.green900) }]}>ACADEMIC SETUP · 1</Text></View>
+        <Text style={[styles.eyebrow, { color: theme.green700 }]}>SELECT YOUR PROGRAM</Text>
+        <Text style={[styles.title, { color: theme.ink }]}>Choose your degree route</Text>
+        <Text style={[styles.subtitle, { color: theme.muted }]}>Supported curricula are maintained inside Tatak Planner, so you no longer need to save or upload a SOLAR HTML page.</Text>
 
-        <View style={styles.uploadCard}>
-          <Text style={styles.uploadIcon}>⇧</Text>
-          <Text style={styles.uploadTitle}>Program Curriculum.html</Text>
-          <Text style={styles.uploadBody}>FEU Tech BS Computer Engineering only for version 1</Text>
-          <PrimaryButton
-            label={preview ? 'Choose a different file' : 'Choose HTML file'}
-            loading={loading}
-            onPress={chooseFile}
-            tone={preview ? 'light' : 'green'}
-            style={styles.chooseButton}
-          />
+        <View style={styles.programGrid}>
+          {supportedPrograms.map((program) => (
+            <Pressable
+              key={program.id}
+              accessibilityRole="button"
+              accessibilityLabel={`Select ${program.code}, ${program.name}`}
+              onPress={() => {
+                const selected = curriculumForProgram(program.id);
+                if (selected) setCurriculum(selected);
+              }}
+              style={({ pressed }) => [styles.programCard, { backgroundColor: theme.surface, borderColor: theme.green700, shadowColor: theme.green900 }, pressed && styles.pressed]}
+            >
+              <View style={[styles.programBadge, { backgroundColor: theme.green900 }]}><Text style={[styles.programBadgeText, { color: theme.gold }]}>{program.code}</Text></View>
+              <Text style={[styles.programName, { color: theme.ink }]}>{program.name}</Text>
+              <Text style={[styles.school, { color: theme.muted }]}>{program.school}</Text>
+              <View style={styles.programFooter}><Text style={[styles.programMeta, { color: theme.green700 }]}>{program.curriculum.courses.length} courses · {program.curriculum.terms.length} trimesters</Text><Text style={[styles.arrow, { color: theme.green700 }]}>→</Text></View>
+            </Pressable>
+          ))}
         </View>
 
-        {preview && (
-          <View style={styles.resultCard}>
-            <Text style={styles.valid}>✓ VALID FEU TECH EXPORT</Text>
-            <Text style={styles.program}>{preview.program}</Text>
-            <View style={styles.metrics}>
-              <Metric value={preview.courses.length} label="Courses" />
-              <Metric value={preview.terms.length} label="Trimesters" />
-              <Metric
-                value={preview.courses.reduce((total, course) => total + course.units, 0)}
-                label="Total units"
-              />
-            </View>
-            {warnings.map((warning) => (
-              <Text key={warning} style={styles.warning}>⚠ {warning}</Text>
-            ))}
-            <PrimaryButton
-              label="Continue to academic setup"
-              onPress={() => setSettingUp(true)}
-              style={styles.createButton}
-            />
-          </View>
-        )}
-        <Text style={styles.privacy}>
-          The importer requires the SOLAR URL marker, curriculum table headers, and a CpE course set. Other HTML files are rejected.
-        </Text>
+        <View style={[styles.notice, { backgroundColor: theme.green100, borderColor: theme.border }]}>
+          <Text style={[styles.noticeTitle, { color: theme.green800 }]}>More FEU Tech programs can be added</Text>
+          <Text style={[styles.noticeText, { color: theme.muted }]}>The selector is backed by a reusable internal program catalog. BSCpE is the supported program in this version.</Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
 }
 
-function Metric({ value, label }: { value: number; label: string }) {
-  return (
-    <View style={styles.metric}>
-      <Text style={styles.metricValue}>{value}</Text>
-      <Text style={styles.metricLabel}>{label}</Text>
-    </View>
-  );
-}
-
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.canvas },
-  page: { padding: 24, paddingBottom: 48 },
-  backButton: { alignSelf: 'flex-start', paddingVertical: 7 },
-  backText: { color: colors.green700, fontSize: 12, fontWeight: '900' },
-  step: { alignSelf: 'flex-start', borderRadius: 10, backgroundColor: colors.green100, paddingHorizontal: 10, paddingVertical: 6 },
-  stepText: { color: colors.green800, fontSize: 11, fontWeight: '900', letterSpacing: 0.7 },
-  title: { marginTop: 18, color: colors.ink, fontSize: 31, lineHeight: 36, fontWeight: '900' },
-  subtitle: { marginTop: 10, color: colors.muted, fontSize: 15, lineHeight: 23 },
-  uploadCard: {
-    marginTop: 26,
-    padding: 25,
-    backgroundColor: colors.surface,
-    borderWidth: 1.5,
-    borderColor: '#B9CDC1',
-    borderStyle: 'dashed',
-    borderRadius: 22,
-    alignItems: 'center',
-  },
-  uploadIcon: { fontSize: 35, color: colors.green700, fontWeight: '700' },
-  uploadTitle: { marginTop: 9, fontSize: 17, fontWeight: '900', color: colors.ink },
-  uploadBody: { marginTop: 5, textAlign: 'center', color: colors.muted, lineHeight: 20 },
-  chooseButton: { marginTop: 18, alignSelf: 'stretch' },
-  resultCard: { marginTop: 18, padding: 20, borderRadius: 20, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  valid: { color: colors.green700, fontSize: 11, fontWeight: '900', letterSpacing: 0.8 },
-  program: { marginTop: 6, fontSize: 20, fontWeight: '900', color: colors.ink },
-  metrics: { marginTop: 16, flexDirection: 'row', gap: 8 },
-  metric: { flex: 1, padding: 11, backgroundColor: colors.canvas, borderRadius: 12 },
-  metricValue: { color: colors.green900, fontSize: 20, fontWeight: '900' },
-  metricLabel: { color: colors.muted, fontSize: 11, marginTop: 2 },
-  warning: { color: colors.warning, marginTop: 12, lineHeight: 18, fontSize: 12 },
-  createButton: { marginTop: 18 },
-  privacy: { marginTop: 18, color: colors.muted, fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  page: { width: '100%', maxWidth: 900, alignSelf: 'center', padding: 26, paddingBottom: 54 },
+  backButton: { alignSelf: 'flex-start', paddingVertical: 8 },
+  backText: { fontSize: 12, fontWeight: '900' },
+  step: { alignSelf: 'flex-start', marginTop: 8, borderRadius: 10, paddingHorizontal: 10, paddingVertical: 6 },
+  stepText: { fontSize: 10, fontWeight: '900', letterSpacing: 0.8 },
+  eyebrow: { marginTop: 28, fontSize: 10, fontWeight: '900', letterSpacing: 1.4 },
+  title: { marginTop: 7, fontSize: 33, lineHeight: 39, fontWeight: '900' },
+  subtitle: { marginTop: 10, maxWidth: 680, fontSize: 14, lineHeight: 22 },
+  programGrid: { marginTop: 26, gap: 12 },
+  programCard: { minHeight: 190, padding: 22, borderRadius: 22, borderWidth: 2, shadowOpacity: 0.12, shadowRadius: 16, elevation: 5 },
+  pressed: { opacity: 0.78, transform: [{ scale: 0.995 }] },
+  programBadge: { alignSelf: 'flex-start', paddingHorizontal: 13, paddingVertical: 8, borderRadius: 10 },
+  programBadgeText: { fontSize: 15, fontWeight: '900', letterSpacing: 0.8 },
+  programName: { marginTop: 18, maxWidth: 560, fontSize: 22, lineHeight: 28, fontWeight: '900' },
+  school: { marginTop: 5, fontSize: 12, fontWeight: '700' },
+  programFooter: { marginTop: 'auto', paddingTop: 18, flexDirection: 'row', alignItems: 'center' },
+  programMeta: { flex: 1, fontSize: 10, fontWeight: '900' },
+  arrow: { fontSize: 24, fontWeight: '900' },
+  notice: { marginTop: 18, padding: 15, borderRadius: 15, borderWidth: 1 },
+  noticeTitle: { fontSize: 12, fontWeight: '900' },
+  noticeText: { marginTop: 5, fontSize: 11, lineHeight: 17 },
 });

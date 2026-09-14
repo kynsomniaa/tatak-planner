@@ -5,6 +5,33 @@ export const FEU_CPE_COREQUISITE_PAIRS: Array<[string, string]> = [
   ['COE0001', 'COE0003'],
 ];
 
+interface ProgramCourseMetadata {
+  codes?: string[];
+  title?: RegExp;
+  courseRole: import('../types').CourseRole;
+  foundationalWeight?: number;
+  challenging?: boolean;
+}
+
+/** Program-owned semantic metadata; layout code remains reusable and coordinate-free. */
+const PROGRAM_COURSE_METADATA: Record<string, ProgramCourseMetadata[]> = {
+  'BS Computer Engineering': [
+    { codes: ['COE0007'], title: /\bCALCULUS 1\b/i, courseRole: 'core_gateway', foundationalWeight: 0.96, challenging: true },
+    { codes: ['COE0013'], title: /\bCALCULUS 2\b/i, courseRole: 'foundation', foundationalWeight: 0.92, challenging: true },
+    { codes: ['COE0011'], title: /ENGINEERING DATA ANALYSIS/i, courseRole: 'core_gateway', foundationalWeight: 1, challenging: true },
+    { codes: ['COE0009'], title: /PHYSICS FOR ENGINEERS 1/i, courseRole: 'core_gateway', foundationalWeight: 0.98, challenging: true },
+    { codes: ['COE0015'], title: /PHYSICS FOR ENGINEERS 2/i, courseRole: 'foundation', foundationalWeight: 0.94, challenging: true },
+    { title: /PRACTICE AND DESIGN|THESIS|CAPSTONE/i, courseRole: 'milestone' },
+    { title: /INTERNSHIP|\bOJT\b|PRACTICUM/i, courseRole: 'milestone' },
+  ],
+};
+
+function metadataForCourse(curriculum: Curriculum, code: string, title: string) {
+  return (PROGRAM_COURSE_METADATA[curriculum.program] ?? []).find((item) =>
+    (item.codes?.includes(code) ?? false) || Boolean(item.title?.test(title)),
+  );
+}
+
 export function applyKnownCurriculumRules(curriculum: Curriculum): Curriculum {
   const available = new Set(curriculum.courses.map((course) => course.code));
   const known = new Map<string, Set<string>>();
@@ -13,13 +40,18 @@ export function applyKnownCurriculumRules(curriculum: Curriculum): Curriculum {
     known.set(left, new Set([...(known.get(left) ?? []), right]));
     known.set(right, new Set([...(known.get(right) ?? []), left]));
   });
-  if (known.size === 0) return curriculum;
   return {
     ...curriculum,
-    courses: curriculum.courses.map((course) => ({
-      ...course,
-      corequisites: [...new Set([...(course.corequisites ?? []), ...(known.get(course.code) ?? [])])],
-    })),
+    courses: curriculum.courses.map((course) => {
+      const metadata = metadataForCourse(curriculum, course.code, course.title);
+      return {
+        ...course,
+        corequisites: [...new Set([...(course.corequisites ?? []), ...(known.get(course.code) ?? [])])],
+        courseRole: metadata?.courseRole ?? course.courseRole ?? 'standard',
+        foundationalWeight: metadata?.foundationalWeight ?? course.foundationalWeight,
+        challenging: metadata?.challenging ?? course.challenging,
+      };
+    }),
   };
 }
 

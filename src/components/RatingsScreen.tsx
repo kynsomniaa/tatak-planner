@@ -6,6 +6,7 @@ import { visibleCurriculumCourses } from '../domain/academicSetup';
 import { CourseFilter, courseDepartment, courseFilters } from '../domain/coursePresentation';
 import { cloudConfigured } from '../services/supabase';
 import { deleteRating, loadRatings, moderateRating, ratingSummary, reportRating, saveRating } from '../services/ratings';
+import { StarRating } from './StarRating';
 import { PrimaryButton } from './ui';
 
 export function RatingsScreen({ session, workspace }: { session: AppSession; workspace: StudentWorkspace }) {
@@ -98,7 +99,15 @@ export function RatingsScreen({ session, workspace }: { session: AppSession; wor
       <Text style={[styles.subtitle, { color: theme.muted }]}>Browse every course by department. Publishing requires the course to be marked Passed or Retake.</Text>
 
       {!cloudConfigured && <View style={[styles.previewBanner, { backgroundColor: theme.warningSoft, borderColor: theme.warning }]}><Text style={[styles.previewTitle, { color: theme.warning }]}>Local preview mode</Text><Text style={[styles.previewText, { color: theme.ink }]}>Ratings become shared after Supabase is connected.</Text></View>}
-      {showInfo && <View style={[styles.infoBubble, { backgroundColor: theme.green100, borderColor: theme.green700 }]}><Pressable onPress={() => setShowInfo(false)} style={styles.infoClose}><Text style={[styles.infoCloseText, { color: theme.green900 }]}>×</Text></Pressable><Text style={[styles.infoTitle, { color: theme.green900 }]}>How to rate</Text><Text style={[styles.infoText, { color: theme.green800 }]}><Text style={styles.infoStrong}>Difficulty:</Text> overall difficulty of the course.</Text><Text style={[styles.infoText, { color: theme.green800 }]}><Text style={styles.infoStrong}>Workload:</Text> how demanding or time-consuming it is.</Text><Text style={[styles.infoText, { color: theme.green800 }]}><Text style={styles.infoStrong}>Usefulness:</Text> how valuable or relevant the subject felt.</Text></View>}
+      {showInfo && (
+        <View style={[styles.infoBubble, { backgroundColor: theme.surface, borderColor: theme.green700 }]}>
+          <Pressable accessibilityLabel="Close How to rate" onPress={() => setShowInfo(false)} style={[styles.infoClose, { backgroundColor: theme.canvas }]}><Text style={[styles.infoCloseText, { color: theme.ink }]}>×</Text></Pressable>
+          <Text style={[styles.infoTitle, { color: theme.ink }]}>How to rate</Text>
+          <Text style={[styles.infoText, { color: theme.ink }]}><Text style={[styles.infoStrong, { color: theme.green700 }]}>Difficulty:</Text> overall difficulty of the course.</Text>
+          <Text style={[styles.infoText, { color: theme.ink }]}><Text style={[styles.infoStrong, { color: theme.green700 }]}>Workload:</Text> how demanding or time-consuming it is.</Text>
+          <Text style={[styles.infoText, { color: theme.ink }]}><Text style={[styles.infoStrong, { color: theme.green700 }]}>Usefulness:</Text> how valuable or relevant the subject felt.</Text>
+        </View>
+      )}
 
       <View style={[styles.departmentTabs, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
         {courseFilters.map((item) => {
@@ -111,7 +120,8 @@ export function RatingsScreen({ session, workspace }: { session: AppSession; wor
         {courses.map((course) => {
           const courseSummary = ratingSummary(course.code, ratings);
           const active = selectedCourse?.code === course.code;
-          return <Pressable key={course.code} onPress={() => chooseCourse(course)} style={[styles.courseChoice, { backgroundColor: active ? theme.green900 : theme.surface, borderColor: active ? theme.green900 : theme.border }]}><Text style={[styles.courseCode, { color: active ? theme.gold : theme.green700 }]}>{course.code}</Text><Text numberOfLines={2} style={[styles.courseTitle, { color: active ? contrastText(theme.green900) : theme.ink }]}>{course.title}</Text><Text style={[styles.courseRating, { color: active ? contrastText(theme.green900) : theme.muted }]}>{courseSummary.count > 0 ? `${courseSummary.difficulty?.toFixed(1)} difficulty · ${courseSummary.count} rating${courseSummary.count === 1 ? '' : 's'}` : 'Not yet rated'}</Text></Pressable>;
+          const foreground = active ? contrastText(theme.green900) : theme.muted;
+          return <Pressable key={course.code} onPress={() => chooseCourse(course)} style={[styles.courseChoice, { backgroundColor: active ? theme.green900 : theme.surface, borderColor: active ? theme.green900 : theme.border }]}><Text style={[styles.courseCode, { color: active ? theme.gold : theme.green700 }]}>{course.code}</Text><Text numberOfLines={2} style={[styles.courseTitle, { color: active ? contrastText(theme.green900) : theme.ink }]}>{course.title}</Text>{courseSummary.count > 0 && courseSummary.difficulty !== null ? <View style={styles.courseRating}><StarRating value={courseSummary.difficulty} size="xs" label="Difficulty" valueColor={foreground} /><Text style={[styles.courseRatingCount, { color: foreground }]}>{courseSummary.count} rating{courseSummary.count === 1 ? '' : 's'}</Text></View> : <Text style={[styles.courseRatingEmpty, { color: foreground }]}>Not yet rated</Text>}</Pressable>;
         })}
       </ScrollView>
 
@@ -181,7 +191,7 @@ function CommentsList({ ratings, session, onRefresh }: { ratings: CourseRating[]
     <View>
       <Text style={[styles.panelTitle, { color: theme.ink }]}>Student comments</Text>
       <Text style={[styles.panelHelp, { color: theme.muted }]}>{ratings.length} shared experience{ratings.length === 1 ? '' : 's'}</Text>
-      {ratings.map((rating) => <View key={rating.id} style={[styles.review, { backgroundColor: theme.canvas }]}><View style={styles.reviewHeader}><Text style={[styles.username, { color: theme.green700 }]}>@{rating.username}</Text><Text style={[styles.reviewScores, { color: theme.muted }]}>D {rating.difficulty} · W {rating.workload} · U {rating.usefulness}</Text></View>{rating.comment ? <Text style={[styles.reviewComment, { color: theme.ink }]}>{rating.comment}</Text> : <Text style={[styles.noComment, { color: theme.muted }]}>No written comment.</Text>}<View style={styles.reviewActions}>{rating.userId !== session.id && <Pressable onPress={() => void reportRating(session, rating.id).then(onRefresh)}><Text style={[styles.actionText, { color: theme.danger }]}>Report</Text></Pressable>}{session.role === 'admin' && <Pressable onPress={() => void moderateRating(session, rating.id, true).then(onRefresh)}><Text style={[styles.adminAction, { color: theme.warning }]}>Hide · {rating.reportCount ?? 0} reports</Text></Pressable>}</View></View>)}
+      {ratings.map((rating) => <View key={rating.id} style={[styles.review, { backgroundColor: theme.canvas }]}><View style={styles.reviewHeader}><Text style={[styles.username, { color: theme.green700 }]}>@{rating.username}</Text><View style={styles.reviewScores}><CriterionStars label="D" fullLabel="Difficulty" value={rating.difficulty} /><CriterionStars label="W" fullLabel="Workload" value={rating.workload} /><CriterionStars label="U" fullLabel="Usefulness" value={rating.usefulness} /></View></View>{rating.comment ? <Text style={[styles.reviewComment, { color: theme.ink }]}>{rating.comment}</Text> : <Text style={[styles.noComment, { color: theme.muted }]}>No written comment.</Text>}<View style={styles.reviewActions}>{rating.userId !== session.id && <Pressable onPress={() => void reportRating(session, rating.id).then(onRefresh)}><Text style={[styles.actionText, { color: theme.danger }]}>Report</Text></Pressable>}{session.role === 'admin' && <Pressable onPress={() => void moderateRating(session, rating.id, true).then(onRefresh)}><Text style={[styles.adminAction, { color: theme.warning }]}>Hide · {rating.reportCount ?? 0} reports</Text></Pressable>}</View></View>)}
       {ratings.length === 0 && <View style={[styles.noReviewsBox, { backgroundColor: theme.canvas }]}><Text style={[styles.noReviews, { color: theme.muted }]}>No comments yet. The first student experience can be especially useful.</Text></View>}
     </View>
   );
@@ -189,12 +199,17 @@ function CommentsList({ ratings, session, onRefresh }: { ratings: CourseRating[]
 
 function ScorePicker({ label, value, onChange }: { label: string; value: number; onChange: (value: number) => void }) {
   const theme = useAppTheme();
-  return <View style={styles.scoreBlock}><View style={styles.scoreHeading}><Text style={[styles.scoreLabel, { color: theme.ink }]}>{label}</Text><Text style={[styles.scoreValue, { color: theme.green700 }]}>{value}/5</Text></View><View style={styles.scoreButtons}>{[1, 2, 3, 4, 5].map((score) => <Pressable key={score} onPress={() => onChange(score)} style={[styles.scoreButton, { backgroundColor: value === score ? theme.green800 : theme.canvas }]}><Text style={[styles.scoreText, { color: value === score ? contrastText(theme.green800) : theme.muted }]}>{score}</Text></Pressable>)}</View></View>;
+  return <View style={styles.scoreBlock}><View style={styles.scoreHeading}><Text style={[styles.scoreLabel, { color: theme.ink }]}>{label}</Text><StarRating value={value} size="sm" label={label} valueColor={theme.green700} /></View><View style={styles.scoreButtons}>{[1, 2, 3, 4, 5].map((score) => <Pressable accessibilityLabel={`Rate ${label} ${score} out of 5`} key={score} onPress={() => onChange(score)} style={[styles.scoreButton, { backgroundColor: value === score ? theme.green800 : theme.canvas }]}><Text style={[styles.scoreText, { color: value === score ? contrastText(theme.green800) : theme.muted }]}>{score}</Text></Pressable>)}</View></View>;
 }
 
 function Summary({ label, value }: { label: string; value?: number | null }) {
   const theme = useAppTheme();
-  return <View style={[styles.summaryCard, { backgroundColor: theme.canvas }]}><Text style={[styles.summaryValue, { color: theme.green700 }]}>{value == null ? '—' : value.toFixed(1)}</Text><Text style={[styles.summaryLabel, { color: theme.muted }]}>{label}</Text></View>;
+  return <View style={[styles.summaryCard, { backgroundColor: theme.canvas }]}><Text style={[styles.summaryLabel, { color: theme.muted }]}>{label}</Text>{value == null ? <Text style={[styles.summaryEmpty, { color: theme.muted }]}>No ratings yet</Text> : <StarRating value={value} size="sm" label={label} valueColor={theme.green700} />}</View>;
+}
+
+function CriterionStars({ label, fullLabel, value }: { label: string; fullLabel: string; value: number }) {
+  const theme = useAppTheme();
+  return <View style={styles.reviewCriterion}><Text style={[styles.reviewCriterionLabel, { color: theme.muted }]}>{label}</Text><StarRating value={value} size={9} showValue={false} label={fullLabel} /></View>;
 }
 
 const styles = StyleSheet.create({
@@ -206,7 +221,7 @@ const styles = StyleSheet.create({
   previewTitle: { fontSize: 12, fontWeight: '900' },
   previewText: { marginTop: 3, fontSize: 10 },
   infoBubble: { marginTop: 15, padding: 15, borderRadius: 15, borderWidth: 1 },
-  infoClose: { position: 'absolute', right: 9, top: 7, width: 28, height: 28, alignItems: 'center', justifyContent: 'center' },
+  infoClose: { position: 'absolute', right: 9, top: 7, width: 28, height: 28, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
   infoCloseText: { fontSize: 20, fontWeight: '900' },
   infoTitle: { fontSize: 13, fontWeight: '900' },
   infoText: { marginTop: 5, fontSize: 11, lineHeight: 16 },
@@ -220,14 +235,16 @@ const styles = StyleSheet.create({
   courseChoice: { width: 184, minHeight: 102, padding: 12, borderRadius: 14, borderWidth: 1 },
   courseCode: { fontSize: 11, fontWeight: '900' },
   courseTitle: { marginTop: 4, fontSize: 11, lineHeight: 15, fontWeight: '700' },
-  courseRating: { marginTop: 'auto', paddingTop: 8, fontSize: 8, fontWeight: '800' },
+  courseRating: { marginTop: 'auto', paddingTop: 8, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 5 },
+  courseRatingCount: { fontSize: 7.5, fontWeight: '800' },
+  courseRatingEmpty: { marginTop: 'auto', paddingTop: 8, fontSize: 8, fontWeight: '800' },
   detailCard: { marginTop: 3, padding: 18, borderRadius: 19, borderWidth: 1 },
   selectedCode: { fontSize: 11, fontWeight: '900' },
   selectedTitle: { marginTop: 4, fontSize: 21, fontWeight: '900' },
-  summaryRow: { marginTop: 14, flexDirection: 'row', gap: 8 },
-  summaryCard: { flex: 1, padding: 11, borderRadius: 12 },
-  summaryValue: { fontSize: 20, fontWeight: '900' },
-  summaryLabel: { marginTop: 2, fontSize: 9, fontWeight: '800' },
+  summaryRow: { marginTop: 14, flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  summaryCard: { flex: 1, minWidth: 150, padding: 11, borderRadius: 12, gap: 5 },
+  summaryLabel: { fontSize: 9, fontWeight: '800' },
+  summaryEmpty: { fontSize: 10, fontStyle: 'italic' },
   desktopColumns: { marginTop: 18, flexDirection: 'row', alignItems: 'flex-start' },
   commentsColumn: { width: '58%', paddingRight: 18, borderRightWidth: 1 },
   formColumn: { width: '42%', paddingLeft: 18 },
@@ -237,7 +254,9 @@ const styles = StyleSheet.create({
   review: { marginBottom: 8, padding: 13, borderRadius: 13 },
   reviewHeader: { flexDirection: 'row', justifyContent: 'space-between', gap: 8 },
   username: { fontSize: 11, fontWeight: '900' },
-  reviewScores: { fontSize: 9, fontWeight: '800' },
+  reviewScores: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'flex-end', gap: 6 },
+  reviewCriterion: { flexDirection: 'row', alignItems: 'center', gap: 3 },
+  reviewCriterionLabel: { fontSize: 8, fontWeight: '900' },
   reviewComment: { marginTop: 7, fontSize: 12, lineHeight: 18 },
   noComment: { marginTop: 7, fontSize: 10, fontStyle: 'italic' },
   reviewActions: { marginTop: 8, flexDirection: 'row', gap: 15 },
@@ -247,9 +266,8 @@ const styles = StyleSheet.create({
   noReviews: { textAlign: 'center', fontSize: 11, lineHeight: 17 },
   form: { width: '100%' },
   scoreBlock: { marginTop: 12 },
-  scoreHeading: { flexDirection: 'row', justifyContent: 'space-between' },
+  scoreHeading: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 10 },
   scoreLabel: { fontSize: 11, fontWeight: '800' },
-  scoreValue: { fontSize: 10, fontWeight: '900' },
   scoreButtons: { marginTop: 6, flexDirection: 'row', gap: 5 },
   scoreButton: { flex: 1, height: 36, alignItems: 'center', justifyContent: 'center', borderRadius: 9 },
   scoreText: { fontSize: 11, fontWeight: '900' },

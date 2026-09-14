@@ -1,4 +1,6 @@
 export type CourseStatus = 'passed' | 'active' | 'pending' | 'retake';
+export type CourseVisualState = 'passed' | 'active' | 'planned' | 'available' | 'locked';
+export type CourseRole = 'standard' | 'foundation' | 'core_gateway' | 'milestone';
 export type ThemePalette = 'feu-green' | 'dark' | 'black-maroon' | 'black-orange' | 'pastel-pink' | 'system';
 
 export type GoalKind =
@@ -24,17 +26,31 @@ export interface Course {
   corequisites: string[];
   linkedLaboratories: string[];
   description?: string;
+  /** Portable semantic importance used by graph analysis and future curricula. */
+  courseRole?: CourseRole;
+  /** 0..1 weight for early courses that anchor important downstream branches. */
+  foundationalWeight?: number;
+  /** Reusable curriculum-owned flag for unusually difficult or disruptive courses. */
+  challenging?: boolean;
 }
 
 export interface Curriculum {
   id: string;
-  program: 'BS Computer Engineering';
-  school: 'FEU Institute of Technology';
+  program: string;
+  school: string;
   sourceFileName: string;
   importedAt: string;
   terms: CurriculumTerm[];
   courses: Course[];
   fingerprint: string;
+}
+
+export interface SupportedProgram {
+  id: string;
+  code: string;
+  name: string;
+  school: string;
+  curriculum: Curriculum;
 }
 
 export interface StudentGoal {
@@ -128,7 +144,7 @@ export interface CourseRating {
   id: string;
   userId: string;
   username: string;
-  program: 'BS Computer Engineering';
+  program: string;
   courseCode: string;
   difficulty: number;
   workload: number;

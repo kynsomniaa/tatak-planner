@@ -8,11 +8,14 @@ import { compareCourseCodesForBoard, courseDepartment } from '../src/domain/cour
 import { applyKnownCurriculumRules, isThesisOrDesignCourse } from '../src/domain/curriculumRules';
 import { orderedBoardTerms, reorderBoardColumns, resolveBoardColumnDrop, starterBoardPositions } from '../src/domain/boardLayout';
 import { goalSuggestions } from '../src/domain/optimizer';
-import { academicTermLabel } from '../src/domain/academicCalendar';
+import { academicCalendarPosition, academicTermLabel, currentCurriculumTerm, currentRaidTerm } from '../src/domain/academicCalendar';
 import { migratePlannerWorkspace } from '../src/domain/workspaceMigration';
 import { availableCourseCodesForRaid, buildCurriculumGraph, courseField, curriculumFieldDefinitions, graphNodesOverlap } from '../src/domain/curriculumGraph';
 import { cameraForWorldRect, clampMapCamera, raidLocateZoom } from '../src/domain/mapCamera';
-import { courseRatingPreview } from '../src/domain/ratingPresentation';
+import { courseRatingPreview, starFillFractions } from '../src/domain/ratingPresentation';
+import { applyBulkPassedChange, applyProgressStatusChange, applyWorkspaceProgressStatus, courseVisualState, eligibleCourseCodes, getMissingPrerequisites } from '../src/domain/academicProgress';
+import { curriculumForProgram, supportedPrograms } from '../src/data/supportedPrograms';
+import { findStrategicPath, raidStrategyRecommendations, strategyTargetCodes } from '../src/domain/raidStrategies';
 
 const rows = Array.from({ length: 10 }, (_, index) => {
   const code = `CPE${String(index + 1).padStart(4, '0')}`;
@@ -128,6 +131,9 @@ assert.equal(progressWorkspace.plannedCourseCodes?.includes('GED0002'), false, '
 assert.deepEqual(progressWorkspace.plannedCourseCodes, ['CPE0001', 'CPE0001L', 'CPE0002', 'GED0001'], 'Raid 1 stays fixed while passed and active courses remain represented');
 assert.deepEqual(progressWorkspace.plannerTermIds, ['y1t1', 'y1t2'], 'raid history runs from the fixed first term through the current term');
 assert.equal(progressWorkspace.plan.CPE0002, 'y1t2', 'active courses are placed in the selected current term');
+assert.equal(courseVisualState(progressWorkspace, 'CPE0002'), 'active', 'ACTIVE has a centralized visual state');
+assert.equal(courseVisualState(progressWorkspace, 'GED0001'), 'planned', 'a future or rostered pending course remains PLANNED instead of ACTIVE');
+assert.equal(courseVisualState(progressWorkspace, 'GED0002'), 'available', 'an eligible unplanned course is AVAILABLE');
 const withNextTerm = addNextPlannerTerm(progressWorkspace);
 assert.deepEqual(withNextTerm.plannerTermIds, ['y1t1', 'y1t2', 'y1t3'], 'future raids appear only after New raid is used');
 const pooledCourse = addCourseToPlan(withNextTerm, 'GED0002', 'y1t3');
@@ -188,6 +194,14 @@ const laterNodes = graph.nodes.filter((node) => node.course.originalTermId !== '
 assert.ok(Math.max(...firstTermNodes.map((node) => node.x)) < Math.min(...laterNodes.map((node) => node.x)), 'official first-term courses occupy the leftmost starting region');
 assert.equal(graphNodesOverlap(graph.nodes), false, 'importance-aware node dimensions never overlap');
 const rectanglesOverlap = (left: { x: number; y: number; width: number; height: number }, right: { x: number; y: number; width: number; height: number }) => left.x < right.x + right.width && left.x + left.width > right.x && left.y < right.y + right.height && left.y + left.height > right.y;
+const connectorCrosses = (edge: { points?: Array<{ x: number; y: number }> }, rect: { x: number; y: number; width: number; height: number }) => (edge.points ?? []).slice(1).some((point, index) => {
+  const previous = edge.points?.[index];
+  if (!previous) return false;
+  return Math.max(previous.x, point.x) >= rect.x - 12
+    && Math.min(previous.x, point.x) <= rect.x + rect.width + 12
+    && Math.max(previous.y, point.y) >= rect.y - 12
+    && Math.min(previous.y, point.y) <= rect.y + rect.height + 12;
+});
 graph.fields.forEach((field) => assert.equal(graph.nodes.some((node) => rectanglesOverlap(field.labelBounds, node)), false, `${field.label} receives a course-free map-title slot`));
 graph.fields.forEach((field, index) => assert.equal(graph.fields.slice(index + 1).some((other) => rectanglesOverlap(field.labelBounds, other.labelBounds)), false, `${field.label} does not obscure another field title`));
 graph.edges.filter((edge) => edge.kind === 'prerequisite').forEach((edge) => {
@@ -222,6 +236,23 @@ const crossingCurriculum: Curriculum = {
 const crossingGraph = buildCurriculumGraph(crossingCurriculum);
 assert.ok(crossingGraph.diagnostics.crossingCountAfter <= crossingGraph.diagnostics.crossingCountBefore, 'barycentric sweeps never increase prerequisite crossings');
 assert.equal(graphNodesOverlap(crossingGraph.nodes), false, 'an alternate curriculum produces a collision-free map without course-specific coordinates');
+
+const denseFoundationCurriculum: Curriculum = {
+  ...curriculum,
+  id: 'dense-foundation-layout',
+  courses: [
+    { code: 'CPE-ROOT', title: 'ROOT', units: 3, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
+    ...Array.from({ length: 5 }, (_, index) => ({ code: `CPE-F${index + 1}`, title: `FOUNDATION ${index + 1}`, units: 3, originalTermId: 'y1t2', prerequisites: ['CPE-ROOT'], corequisites: [], linkedLaboratories: [], courseRole: 'core_gateway' as const, foundationalWeight: 0.9 })),
+    ...Array.from({ length: 5 }, (_, index) => ({ code: `CPE-D${index + 1}`, title: `CORE DESCENDANT ${index + 1}`, units: 3, originalTermId: 'y1t3', prerequisites: [`CPE-F${index + 1}`], corequisites: [], linkedLaboratories: [] })),
+  ],
+};
+const denseFoundationGraph = buildCurriculumGraph(denseFoundationCurriculum);
+assert.ok(Object.values(denseFoundationGraph.foundationBackbone.rankExpansion).some((value) => value > 0), 'artificial center pressure expands local rank spacing');
+assert.equal(graphNodesOverlap(denseFoundationGraph.nodes), false, 'dense foundation placement uses micro-lanes and X staggering without node collisions');
+assert.ok(denseFoundationGraph.foundationBackbone.nodeCodes.every((code) => {
+  const node = denseFoundationGraph.nodes.find((candidate) => candidate.course.code === code)!;
+  return Math.abs(node.y + node.height / 2 - denseFoundationGraph.foundationBackbone.centerY) <= denseFoundationGraph.foundationBackbone.corridorHalfHeight + 180;
+}), 'dense foundations expand/stagger before being dumped into the lower periphery');
 
 const milestoneCurriculum: Curriculum = {
   ...curriculum,
@@ -260,8 +291,11 @@ for (const startingZoom of [0.25, 0.35, 0.5, 0.75, 1, 1.25, 1.5]) {
 }
 const savedCamera = { zoom: 0.35, panX: 400, panY: 300 };
 assert.deepEqual(clampMapCamera(savedCamera, focusContent, focusViewport), savedCamera, 'exiting Raid focus restores the exact valid zoom and pan');
-assert.equal(courseRatingPreview({ courseCode: 'CPE0001', difficulty: 4, workload: 3, usefulness: 5, count: 2 }), '★★★★☆  4.0 (2)', 'Raid choices format a compact preview from real rating criteria');
+assert.deepEqual(courseRatingPreview({ courseCode: 'CPE0001', difficulty: 4, workload: 3, usefulness: 5, count: 2 }), { average: 4, count: 2 }, 'Raid choices receive a real aggregate for reusable visual stars');
 assert.equal(courseRatingPreview({ courseCode: 'CPE0001', difficulty: null, workload: null, usefulness: null, count: 0 }), null, 'unrated courses never receive a fabricated score');
+const fractionalStars = starFillFractions(4.2);
+assert.deepEqual(fractionalStars.slice(0, 4), [1, 1, 1, 1], 'whole-number portions of an average render as full stars');
+assert.ok(Math.abs(fractionalStars[4] - 0.2) < 1e-9, 'decimal averages retain a partial fifth-star fill instead of being rounded into Unicode text');
 
 const cycleCurriculum: Curriculum = {
   ...curriculum,
@@ -287,6 +321,155 @@ const withKnownCorequisites = applyKnownCurriculumRules({
 });
 assert.deepEqual(withKnownCorequisites.courses.find((course) => course.code === 'COE0001')?.corequisites, ['COE0003'], 'FEU CpE math corequisite is restored when the export omits it');
 assert.deepEqual(withKnownCorequisites.courses.find((course) => course.code === 'COE0003')?.corequisites, ['COE0001'], 'known corequisites are symmetric');
+
+const lockedStatuses = { CPE0001: 'pending', CPE0001L: 'pending', CPE0002: 'pending', GED0001: 'pending', GED0002: 'pending' } as const;
+assert.deepEqual(getMissingPrerequisites(curriculum, lockedStatuses, 'CPE0002', 'active'), ['CPE0001'], 'strict validation resolves lecture/lab prerequisites to the visible parent course');
+const blockedActive = applyProgressStatusChange(curriculum, lockedStatuses, 'CPE0002', 'active');
+assert.equal(blockedActive.ok, false, 'a locked course cannot become ACTIVE');
+assert.match(blockedActive.error?.message ?? '', /CPE0001 — LECTURE/, 'the ACTIVE error names the missing prerequisite');
+const blockedPassed = applyProgressStatusChange(curriculum, lockedStatuses, 'CPE0002', 'passed');
+assert.equal(blockedPassed.ok, false, 'a locked course cannot become PASSED');
+assert.match(blockedPassed.error?.message ?? '', /CPE0001 — LECTURE/, 'the PASSED error names the missing prerequisite');
+const foundationPassed = applyProgressStatusChange(curriculum, lockedStatuses, 'CPE0001', 'passed');
+assert.equal(foundationPassed.ok, true);
+assert.equal(foundationPassed.value.CPE0001L, 'passed', 'lecture and laboratory progress remains bundled');
+assert.equal(applyProgressStatusChange(curriculum, foundationPassed.value, 'CPE0002', 'active').ok, true, 'completing the prerequisite unlocks the blocked course');
+const orderedBulk = applyBulkPassedChange(curriculum, lockedStatuses, ['CPE0002', 'CPE0001']);
+assert.equal(orderedBulk.ok, true, 'bulk completion sorts work through prerequisite order instead of trusting click order');
+assert.equal(orderedBulk.value.CPE0002, 'passed');
+const impossibleBulk = applyBulkPassedChange(curriculum, lockedStatuses, ['CPE0002']);
+assert.equal(impossibleBulk.ok, false, 'bulk completion cannot create an impossible prerequisite state');
+assert.deepEqual(impossibleBulk.value, lockedStatuses, 'a rejected bulk completion is atomic');
+
+const knownCalendar = currentCurriculumTerm(curriculum, 2025, 1, new Date(2026, 2, 15));
+assert.equal(knownCalendar.id, 'y1t3', 'the calculated current curriculum term follows the FEU trimester calendar');
+assert.equal(currentRaidTerm(curriculum, { startYear: 2025, startTerm: 1, currentYear: 1, currentTerm: 1, currentTermId: 'y1t1', currentCourseCodes: [], inferredPassedCodes: [], manualPassedCodes: [] }, new Date(2026, 2, 15)).id, 'y1t3', 'Current Raid is recalculated from the first enrollment year rather than stale saved UI state');
+const todayPosition = academicCalendarPosition();
+const liveCurrentTerm = currentCurriculumTerm(curriculum, todayPosition.academicYear);
+const liveWorkspace = createWorkspaceFromProgress(curriculum, 'y1t1', { ...lockedStatuses, CPE0001: 'passed', CPE0001L: 'passed' }, {}, todayPosition.academicYear);
+const liveActive = applyWorkspaceProgressStatus(liveWorkspace, 'CPE0002', 'active');
+assert.equal(liveActive.ok, true);
+assert.equal(liveActive.value.plan.CPE0002, liveCurrentTerm.id, 'Progress places a newly ACTIVE course in the calculated Current Raid');
+assert.equal(liveActive.value.academicProfile?.currentTermId, liveCurrentTerm.id, 'Progress refreshes stale current-term profile metadata');
+
+assert.equal(supportedPrograms.length, 1, 'the first release exposes one maintainable built-in program choice');
+assert.equal(supportedPrograms[0].code, 'BSCpE');
+const realCurriculum = curriculumForProgram('feu-bs-cpe');
+assert.ok(realCurriculum, 'the built-in BSCpE curriculum can be selected without an HTML upload');
+assert.equal(realCurriculum!.courses.length, 87, 'the maintained snapshot contains every row from the supplied real curriculum');
+assert.deepEqual(strategyTargetCodes(realCurriculum!, 'thesis'), ['CPE0057L'], 'the real curriculum targets the terminal CpE thesis course instead of an earlier thesis stage');
+assert.deepEqual(strategyTargetCodes(realCurriculum!, 'internship'), ['CPE0069'], 'the real curriculum targets the terminal CpE internship course instead of an earlier internship stage');
+const realGraph = buildCurriculumGraph(realCurriculum!);
+assert.equal(realGraph.nodes.length, 74, 'the real curriculum combines its lecture/laboratory rows into map tiles');
+assert.equal(graphNodesOverlap(realGraph.nodes), false, 'the real BSCpE map has no overlapping emphasized nodes');
+for (const code of ['COE0007', 'COE0009', 'COE0011']) {
+  const node = realGraph.nodes.find((candidate) => candidate.course.code === code)!;
+  assert.ok(node.course.courseRole === 'core_gateway', `${code} is explicit portable gateway metadata`);
+  assert.ok(node.metrics.foundationalWeight >= 0.96, `${code} carries high foundation weight`);
+  assert.ok(['large', 'major'].includes(node.importance), `${code} is visibly more important than a normal tile`);
+}
+const calculusNode = realGraph.nodes.find((node) => node.course.code === 'COE0007')!;
+const calculusTwoNode = realGraph.nodes.find((node) => node.course.code === 'COE0013')!;
+const physicsOneNode = realGraph.nodes.find((node) => node.course.code === 'COE0009')!;
+const physicsTwoNode = realGraph.nodes.find((node) => node.course.code === 'COE0015')!;
+const engineeringDataNode = realGraph.nodes.find((node) => node.course.code === 'COE0011')!;
+assert.deepEqual(new Set(realGraph.foundationBackbone.nodeCodes), new Set(['COE0007', 'COE0009', 'COE0011', 'COE0013', 'COE0015']), 'the real map identifies its entire foundation backbone from course metadata');
+for (const node of [calculusNode, calculusTwoNode, physicsOneNode, physicsTwoNode, engineeringDataNode]) {
+  const distanceFromCenter = Math.abs(node.y + node.height / 2 - realGraph.foundationBackbone.centerY);
+  assert.ok(distanceFromCenter <= realGraph.foundationBackbone.corridorHalfHeight + 80, `${node.course.code} remains in or immediately beside the foundation corridor`);
+}
+for (const node of [calculusNode, calculusTwoNode, physicsOneNode, physicsTwoNode, engineeringDataNode]) {
+  assert.equal(node.course.challenging, true, `${node.course.code} carries reusable challenging-course metadata`);
+  assert.equal(node.challenging, true, `${node.course.code} receives the challenging node treatment from metadata`);
+}
+assert.ok(calculusNode.x + calculusNode.width < calculusTwoNode.x, 'Calculus 1 → Calculus 2 reads left-to-right as a coherent foundation branch');
+assert.ok(physicsOneNode.x + physicsOneNode.width < physicsTwoNode.x, 'Physics 1 → Physics 2 reads left-to-right as a coherent foundation branch');
+assert.ok(realGraph.edges.some((edge) => edge.sourceCode === 'COE0007' && edge.targetCode === 'COE0013'), 'the Calculus foundation branch follows an actual prerequisite edge');
+assert.ok(realGraph.edges.some((edge) => edge.sourceCode === 'COE0009' && edge.targetCode === 'COE0015'), 'the Physics foundation branch follows an actual prerequisite edge');
+assert.ok(Object.values(realGraph.foundationBackbone.rankExpansion).some((value) => value > 0), 'a dense real center expands local rank spacing instead of dumping foundations below the map');
+for (let left = 0; left < realGraph.foundationBackbone.nodeCodes.length; left += 1) {
+  for (let right = left + 1; right < realGraph.foundationBackbone.nodeCodes.length; right += 1) {
+    const a = realGraph.nodes.find((node) => node.course.code === realGraph.foundationBackbone.nodeCodes[left])!;
+    const b = realGraph.nodes.find((node) => node.course.code === realGraph.foundationBackbone.nodeCodes[right])!;
+    const horizontalConflict = a.x < b.x + b.width + 24 && a.x + a.width + 24 > b.x;
+    if (horizontalConflict) assert.ok(Math.abs((a.y + a.height / 2) - (b.y + b.height / 2)) >= a.height / 2 + b.height / 2 + 46 * 1.35 - 0.01, `${a.course.code} and ${b.course.code} retain foundation clearance`);
+  }
+}
+assert.ok(calculusTwoNode.metrics.foundationInfluence > 0.7, 'foundation influence propagates into downstream prerequisite placement');
+assert.ok(calculusNode.width > realGraph.nodes.find((node) => node.course.code === 'GED0007')!.width, 'a foundation gateway is larger than an isolated supporting course');
+assert.ok(realGraph.width >= Math.max(...realGraph.nodes.map((node) => node.x + node.width)) + 100, 'Fit Map bounds include the locally expanded backbone');
+assert.ok(realGraph.diagnostics.crossingCountAfter <= realGraph.diagnostics.crossingCountBefore, 'foundation placement does not increase connector crossings on the real map');
+realGraph.fields.forEach((field) => assert.equal(realGraph.nodes.some((node) => rectanglesOverlap(field.labelBounds, node)), false, `${field.label} title does not overlap a real course tile`));
+realGraph.fields.forEach((field, index) => assert.equal(realGraph.fields.slice(index + 1).some((other) => rectanglesOverlap(field.labelBounds, other.labelBounds)), false, `${field.label} title does not overlap another real field title`));
+realGraph.fields.forEach((field) => assert.equal(realGraph.edges.some((edge) => (edge.prominence ?? 0) >= 0.55 && connectorCrosses(edge, field.labelBounds)), false, `${field.label} title stays clear of major connectors`));
+
+const strategyWorkspace: StudentWorkspace = {
+  curriculum: milestoneCurriculum,
+  plan: { 'PATH-A': 'y1t1' },
+  statuses: { 'PATH-A': 'passed', 'PATH-B': 'pending', 'PATH-C': 'pending', 'PATH-D': 'pending' },
+  plannedCourseCodes: ['PATH-A'],
+  plannerTermIds: ['y1t1', 'y1t2'],
+  updatedAt: '2026-09-13T00:00:00.000Z',
+};
+const thesisRecommendations = raidStrategyRecommendations(strategyWorkspace, 'y1t2', 'thesis', []);
+const internshipRecommendations = raidStrategyRecommendations(strategyWorkspace, 'y1t2', 'internship', []);
+assert.equal(thesisRecommendations[0].courseCode, 'PATH-B', 'Thesis Priority ranks the eligible course that advances the actual thesis ancestry first');
+assert.equal(internshipRecommendations[0].courseCode, 'PATH-B', 'Internship Priority ranks the eligible course that advances the actual internship ancestry first');
+assert.deepEqual(strategyTargetCodes(milestoneCurriculum, 'thesis'), ['PATH-C']);
+assert.deepEqual(strategyTargetCodes(milestoneCurriculum, 'internship'), ['PATH-D']);
+assert.deepEqual(thesisRecommendations[0].strategicPath, ['PATH-B', 'PATH-C'], 'a Thesis recommendation carries its exact graph-derived recommendation → milestone path');
+assert.deepEqual(internshipRecommendations[0].strategicPath, ['PATH-B', 'PATH-D'], 'an Internship recommendation carries its exact graph-derived recommendation → milestone path');
+assert.match(thesisRecommendations[0].pathText ?? '', /PATH-B.*PATH-C/, 'the compact student-facing Thesis chain names real path nodes');
+assert.match(thesisRecommendations[0].impact ?? '', /Removes 1 of 1 remaining Thesis bottleneck/, 'the impact statement is calculated from remaining student bottlenecks');
+assert.equal(thesisRecommendations[0].relationship, 'direct', 'after the second-level feeder is passed, Thesis Priority advances to the unfinished direct prerequisite');
+assert.equal(thesisRecommendations[0].eligible, true, 'the advanced direct prerequisite remains immediately addable when valid');
+assert.deepEqual(findStrategicPath(milestoneCurriculum, strategyWorkspace, 'PATH-B', ['PATH-C']), ['PATH-B', 'PATH-C'], 'the exported path finder returns a valid directed curriculum path');
+assert.deepEqual(findStrategicPath(milestoneCurriculum, strategyWorkspace, 'PATH-C', ['PATH-C']), ['PATH-C'], 'an immediately eligible milestone remains a valid final recommendation');
+const ratedWorkload = Array.from({ length: 3 }, (_, index) => ({ id: `r${index}`, userId: `user-${index}`, courseCode: 'PATH-B', username: `u${index}`, difficulty: 5, workload: 2, usefulness: 4, comment: '', createdAt: '', updatedAt: '', hidden: false, reports: 0, program: 'BS Computer Engineering' }));
+const ratedThesisRecommendations = raidStrategyRecommendations(strategyWorkspace, 'y1t2', 'thesis', ratedWorkload);
+assert.equal(ratedThesisRecommendations[0].rating?.criterion, 'Difficulty', 'strategic recommendations display the actual planning-relevant rating criterion');
+assert.equal(ratedThesisRecommendations[0].rating?.average, 5, 'strategic recommendation ratings are calculated from real community data');
+const lighterRecommendations = raidStrategyRecommendations(strategyWorkspace, 'y1t2', 'lighter', ratedWorkload);
+assert.deepEqual(lighterRecommendations.map((item) => item.courseCode), ['PATH-B'], 'Lighter Workload only recommends currently eligible courses');
+assert.match(lighterRecommendations[0].reason, /from 3 ratings/, 'Lighter Workload uses real community workload when enough ratings exist');
+assert.equal(raidStrategyRecommendations({ ...strategyWorkspace, statuses: { ...strategyWorkspace.statuses, 'PATH-B': 'passed' } }, 'y1t2', 'thesis', []).some((item) => item.courseCode === 'PATH-B'), false, 'already-passed courses are never recommended as next courses');
+
+const longPathCurriculum: Curriculum = {
+  ...milestoneCurriculum,
+  id: 'long-strategy-path',
+  courses: [
+    { code: 'LONG-A', title: 'FOUNDATION COMPLETE', units: 3, originalTermId: 'y1t1', prerequisites: [], corequisites: [], linkedLaboratories: [] },
+    { code: 'LONG-B', title: 'NEXT CORE COURSE', units: 3, originalTermId: 'y1t2', prerequisites: ['LONG-A'], corequisites: [], linkedLaboratories: [], courseRole: 'core_gateway', foundationalWeight: 0.9 },
+    { code: 'LONG-C', title: 'IMPORTANT INTERMEDIATE', units: 3, originalTermId: 'y1t3', prerequisites: ['LONG-B'], corequisites: [], linkedLaboratories: [] },
+    { code: 'LONG-D', title: 'ADVANCED INTERMEDIATE', units: 3, originalTermId: 'y1t3', prerequisites: ['LONG-C'], corequisites: [], linkedLaboratories: [] },
+    { code: 'LONG-E', title: 'DIRECT PROJECT PREREQUISITE', units: 3, originalTermId: 'y1t3', prerequisites: ['LONG-D'], corequisites: [], linkedLaboratories: [] },
+    { code: 'LONG-F', title: 'COMPUTER ENGINEERING THESIS', units: 6, originalTermId: 'y1t3', prerequisites: ['LONG-E'], corequisites: [], linkedLaboratories: [], courseRole: 'milestone' },
+  ],
+};
+const longPathWorkspace: StudentWorkspace = {
+  ...strategyWorkspace,
+  curriculum: longPathCurriculum,
+  plan: { 'LONG-A': 'y1t1' },
+  statuses: { 'LONG-A': 'passed', 'LONG-B': 'pending', 'LONG-C': 'pending', 'LONG-D': 'pending', 'LONG-E': 'pending', 'LONG-F': 'pending' },
+  plannedCourseCodes: ['LONG-A'],
+};
+const longRecommendations = raidStrategyRecommendations(longPathWorkspace, 'y1t2', 'thesis', []);
+const lockedFeederRecommendation = longRecommendations.find((item) => item.courseCode === 'LONG-D')!;
+assert.equal(lockedFeederRecommendation.relationship, 'feeder', 'Thesis Priority explicitly prioritizes prerequisites of the direct Thesis prerequisite');
+assert.equal(lockedFeederRecommendation.eligible, false, 'a strategically useful but currently locked feeder is not presented as takeable');
+assert.deepEqual(lockedFeederRecommendation.missingPrerequisites, ['LONG-C'], 'the locked feeder names its real immediate blocker');
+assert.match(lockedFeederRecommendation.availabilityText, /LONG-C — IMPORTANT INTERMEDIATE/, 'the locked explanation includes the blocker course title');
+const longNextRecommendation = longRecommendations.find((item) => item.courseCode === 'LONG-B')!;
+assert.deepEqual(longNextRecommendation.strategicPath, ['LONG-B', 'LONG-C', 'LONG-D', 'LONG-E', 'LONG-F'], 'Show Path retains every exact edge in a long recommendation chain');
+assert.ok(longNextRecommendation.displayPath.includes('…') && longNextRecommendation.displayPath.filter((code) => code !== '…').length <= 4, 'long recommendation cards abbreviate the explanation to at most four visible courses');
+const exhaustedFeederWorkspace = { ...longPathWorkspace, statuses: { ...longPathWorkspace.statuses, 'LONG-B': 'passed' as const, 'LONG-C': 'passed' as const, 'LONG-D': 'passed' as const }, plannedCourseCodes: ['LONG-A', 'LONG-B', 'LONG-C', 'LONG-D'] };
+const exhaustedFeederRecommendations = raidStrategyRecommendations(exhaustedFeederWorkspace, 'y1t2', 'thesis', []);
+assert.equal(exhaustedFeederRecommendations[0].courseCode, 'LONG-E', 'when feeder prerequisites are complete, the strategy advances to the next unfinished direct prerequisite');
+assert.equal(exhaustedFeederRecommendations.some((item) => item.courseCode === 'LONG-D'), false, 'completed feeder courses are never recommended for retaking');
+
+const newlyPassedMiddle = applyProgressStatusChange(chainCurriculum, eligibilityWorkspace.statuses, 'CPE0002', 'passed');
+assert.equal(newlyPassedMiddle.ok, true, 'an off-term Already Passed action reuses centralized prerequisite validation');
+assert.equal(eligibleCourseCodes(chainCurriculum, newlyPassedMiddle.value).includes('CPE0003'), true, 'a valid off-term pass immediately unlocks the next current-course choice');
 
 const reorderedColumns = reorderBoardColumns(curriculum.terms, curriculum.terms, [], 'y1t2', -1);
 assert.deepEqual(orderedBoardTerms(curriculum.terms, reorderedColumns).map((term) => term.id), ['y1t2', 'y1t1', 'y1t3'], 'legacy visual column order remains readable without changing academic term order');
@@ -316,4 +499,4 @@ for (const kind of ['earliest_graduation', 'lighter_workload', 'thesis_readiness
   }
 }
 
-console.log('Core tests passed: parser, weighted skill-tree layout, field affinity, cycle detection, crossing reduction, collision handling, chronological raids, strict availability, prerequisite/corequisite rules, setup progress, migration, units, retakes, GWA, and load warnings.');
+console.log('Core tests passed: parser, foundation-backbone layout, challenging metadata and spacing, visual rating fills, explanation-backed feeder strategies, field affinity, cycle detection, crossing reduction, collision handling, chronological raids, strict availability, prerequisite/corequisite rules, off-term setup progress, migration, units, retakes, GWA, and load warnings.');

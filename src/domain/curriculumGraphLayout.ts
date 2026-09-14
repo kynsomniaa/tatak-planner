@@ -1,4 +1,4 @@
-import type { CurriculumGraphAnalysis } from './curriculumGraphAnalysis';
+import { isFoundationBackbone, type CurriculumGraphAnalysis } from './curriculumGraphAnalysis';
 import type {
   CourseImportance,
   CurriculumFieldDefinition,
@@ -19,6 +19,10 @@ const LAYOUT_SWEEPS = 8;
 const STARTER_COLUMNS = 2;
 const STARTER_COLUMN_GAP = 34;
 const STARTER_ROW_GAP = 24;
+const FOUNDATION_LANE_SPACING = 88;
+const FOUNDATION_LANES = [-2, -1, 0, 1, 2];
+const MAX_RANK_EXPANSION = 1.6;
+const DENSITY_EXPANSION = 0.72;
 
 const dimensions: Record<CourseImportance, { width: number; height: number }> = {
   normal: { width: 168, height: 78 },
@@ -32,6 +36,7 @@ const milestoneDimensions = {
   thesis: { width: 480, height: 228 },
   internship: { width: 456, height: 198 },
 };
+const FOUNDATION_CORRIDOR_HALF_HEIGHT = dimensions.normal.height * 1.5;
 const STARTING_REGION_EXIT = CANVAS_PADDING + STARTER_COLUMNS * dimensions.major.width + STARTER_COLUMN_GAP + HORIZONTAL_GAP;
 
 const codeJitter = (code: string) => {
@@ -41,6 +46,28 @@ const codeJitter = (code: string) => {
 };
 
 const centerY = (node: CurriculumGraphNode) => node.y + node.height / 2;
+
+const isFoundationNode = (node: CurriculumGraphNode) => isFoundationBackbone(node.course);
+
+function nodeClearance(node: CurriculumGraphNode) {
+  if (node.milestoneKind) return VERTICAL_GAP * 1.65;
+  if (isFoundationNode(node) && (node.challenging || node.difficult)) return VERTICAL_GAP * 1.5;
+  if (node.challenging || node.difficult) return VERTICAL_GAP * 1.35;
+  if (isFoundationNode(node)) return VERTICAL_GAP * 1.35;
+  return VERTICAL_GAP;
+}
+
+function requiredVerticalDistance(left: CurriculumGraphNode, right: CurriculumGraphNode) {
+  return left.height / 2 + right.height / 2 + Math.max(nodeClearance(left), nodeClearance(right));
+}
+
+function nodeStability(node: CurriculumGraphNode) {
+  if (node.milestoneKind === 'thesis') return 5;
+  if (node.milestoneKind === 'internship') return 4.7;
+  if (isFoundationNode(node)) return 4 + node.metrics.foundationCentrality;
+  if (node.fieldId === 'cpe-core' || node.fieldId === 'hardware-embedded' || node.fieldId === 'networks-systems') return 2.2 + node.importanceScore;
+  return 1 + node.importanceScore * 0.7;
+}
 
 function fieldPairKey(left: CurriculumFieldId, right: CurriculumFieldId) {
   return [left, right].sort().join('|');
@@ -128,16 +155,159 @@ function calculateFieldPlacement(
     const compact = definition?.priority === 'cpe-core' ? 0.68 : definition?.priority === 'general-engineering' ? 0.84 : 1;
     centers.set(field, centerline + offset * FIELD_SPACING * compact);
   });
-  return { centers, importance, affinity };
+  return { centers, importance, affinity, centerline };
 }
 
 function packLayer(nodes: CurriculumGraphNode[], desired: Map<string, number>) {
-  nodes.sort((left, right) => (desired.get(left.course.code) ?? 0) - (desired.get(right.course.code) ?? 0) || left.course.code.localeCompare(right.course.code));
-  let cursor = CANVAS_PADDING;
-  nodes.forEach((node) => {
-    node.y = Math.max(cursor, (desired.get(node.course.code) ?? cursor) - node.height / 2);
-    cursor = node.y + node.height + VERTICAL_GAP;
+  if (nodes.length === 0) return;
+  const placed: CurriculumGraphNode[] = [];
+  const placementOrder = [...nodes].sort((left, right) => nodeStability(right) - nodeStability(left)
+    || (desired.get(left.course.code) ?? 0) - (desired.get(right.course.code) ?? 0)
+    || left.course.code.localeCompare(right.course.code));
+  placementOrder.forEach((node) => {
+    const preferred = Math.max(CANVAS_PADDING, (desired.get(node.course.code) ?? CANVAS_PADDING + node.height / 2) - node.height / 2);
+    const conflictsAt = (candidateY: number) => placed.some((other) => {
+      const horizontal = node.x < other.x + other.width + 24 && node.x + node.width + 24 > other.x;
+      const candidateCenter = candidateY + node.height / 2;
+      return horizontal && Math.abs(candidateCenter - centerY(other)) < requiredVerticalDistance(node, other);
+    });
+    const candidates = [preferred];
+    placed.forEach((other) => {
+      const horizontal = node.x < other.x + other.width + 24 && node.x + node.width + 24 > other.x;
+      if (!horizontal) return;
+      const distance = requiredVerticalDistance(node, other);
+      candidates.push(centerY(other) - distance - node.height / 2, centerY(other) + distance - node.height / 2);
+    });
+    const chosen = candidates
+      .filter((candidate) => candidate >= CANVAS_PADDING && !conflictsAt(candidate))
+      .sort((left, right) => Math.abs(left - preferred) - Math.abs(right - preferred))[0];
+    node.y = chosen ?? Math.max(CANVAS_PADDING, ...placed.map((other) => other.y + other.height + Math.max(nodeClearance(node), nodeClearance(other))));
+    placed.push(node);
   });
+}
+
+function fieldAttractionFactor(node: CurriculumGraphNode) {
+  if (node.course.courseRole === 'core_gateway') return 0.45;
+  if (node.course.courseRole === 'foundation' || isFoundationNode(node)) return 0.55;
+  if (node.importance === 'large' || node.importance === 'major') return 0.8;
+  return 1;
+}
+
+function applyDensityAwareHorizontalExpansion(
+  nodes: CurriculumGraphNode[],
+  predecessors: Map<string, string[]>,
+  topologicalOrder: string[],
+) {
+  const byCode = new Map(nodes.map((node) => [node.course.code, node]));
+  const centralByRank = new Map<number, CurriculumGraphNode[]>();
+  nodes.forEach((node) => {
+    const central = isFoundationNode(node)
+      || node.metrics.foundationInfluence >= 0.58
+      || (['cpe-core', 'hardware-embedded', 'networks-systems', 'design-thesis'].includes(node.fieldId) && node.importanceScore >= 0.56);
+    if (central) centralByRank.set(node.layoutRank, [...(centralByRank.get(node.layoutRank) ?? []), node]);
+  });
+  const expansionByRank = new Map<number, number>();
+  const availableRankWidth = RANK_SPACING * 1.18;
+  centralByRank.forEach((rankNodes, rank) => {
+    const density = rankNodes.reduce((sum, node) => sum + node.width * (1 + node.importanceScore * 0.28 + node.metrics.foundationCentrality * 0.48), 0);
+    const overflow = Math.max(0, density / availableRankWidth - 1);
+    const factor = Math.min(MAX_RANK_EXPANSION, 1 + overflow * DENSITY_EXPANSION);
+    expansionByRank.set(rank, (factor - 1) * RANK_SPACING);
+  });
+  const orderedRanks = [...new Set(nodes.map((node) => node.layoutRank))].sort((left, right) => left - right);
+  const cumulativeBefore = new Map<number, number>();
+  let cumulative = 0;
+  orderedRanks.forEach((rank) => {
+    cumulativeBefore.set(rank, cumulative);
+    cumulative += expansionByRank.get(rank) ?? 0;
+  });
+  nodes.forEach((node) => { node.x += cumulativeBefore.get(node.layoutRank) ?? 0; });
+  centralByRank.forEach((rankNodes, rank) => {
+    const expansion = expansionByRank.get(rank) ?? 0;
+    if (expansion <= 0 || rankNodes.length < 2) return;
+    const foundationNodes = rankNodes.filter(isFoundationNode).sort((left, right) => right.metrics.foundationCentrality - left.metrics.foundationCentrality || left.course.code.localeCompare(right.course.code));
+    const step = Math.min(86, Math.max(22, expansion / Math.max(2, foundationNodes.length)));
+    foundationNodes.forEach((node, index) => {
+      node.x += (index - (foundationNodes.length - 1) / 2) * step;
+    });
+  });
+  topologicalOrder.forEach((code) => {
+    const node = byCode.get(code);
+    if (!node) return;
+    const parents = (predecessors.get(code) ?? []).flatMap((parent) => byCode.get(parent) ? [byCode.get(parent) as CurriculumGraphNode] : []);
+    if (parents.length > 0) node.x = Math.max(node.x, ...parents.map((parent) => parent.x + parent.width + HORIZONTAL_GAP));
+  });
+  return expansionByRank;
+}
+
+function foundationLineage(nodes: CurriculumGraphNode[], dependents: Map<string, string[]>) {
+  const lineages = new Map<string, Array<{ sourceCode: string; distance: number }>>();
+  nodes.filter(isFoundationNode).forEach((source) => {
+    const pending = (dependents.get(source.course.code) ?? []).map((code) => ({ code, distance: 1 }));
+    const seen = new Map<string, number>();
+    while (pending.length > 0) {
+      const current = pending.shift() as { code: string; distance: number };
+      if (current.distance > 3 || (seen.get(current.code) ?? Number.MAX_SAFE_INTEGER) <= current.distance) continue;
+      seen.set(current.code, current.distance);
+      lineages.set(current.code, [...(lineages.get(current.code) ?? []), { sourceCode: source.course.code, distance: current.distance }]);
+      (dependents.get(current.code) ?? []).forEach((code) => pending.push({ code, distance: current.distance + 1 }));
+    }
+  });
+  return lineages;
+}
+
+function chooseFoundationLaneTargets(
+  nodes: CurriculumGraphNode[],
+  predecessors: Map<string, string[]>,
+  dependents: Map<string, string[]>,
+  centerline: number,
+) {
+  const byCode = new Map(nodes.map((node) => [node.course.code, node]));
+  const targets = new Map<string, number>();
+  const placed: CurriculumGraphNode[] = [];
+  const foundations = nodes.filter(isFoundationNode).sort((left, right) => left.layoutRank - right.layoutRank
+    || right.metrics.foundationCentrality - left.metrics.foundationCentrality
+    || left.course.code.localeCompare(right.course.code));
+  foundations.forEach((node) => {
+    const parentNodes = (predecessors.get(node.course.code) ?? []).flatMap((code) => {
+      const parent = byCode.get(code);
+      return parent && isFoundationNode(parent) ? [parent] : [];
+    });
+    const childNodes = (dependents.get(node.course.code) ?? []).flatMap((code) => byCode.get(code) ? [byCode.get(code) as CurriculumGraphNode] : []);
+    const parentY = parentNodes.length > 0
+      ? parentNodes.reduce((sum, parent) => sum + (targets.get(parent.course.code) ?? centerY(parent)) * Math.max(0.2, parent.metrics.foundationCentrality), 0)
+        / parentNodes.reduce((sum, parent) => sum + Math.max(0.2, parent.metrics.foundationCentrality), 0)
+      : centerline;
+    const descendantY = childNodes.length > 0
+      ? childNodes.reduce((sum, child) => sum + centerY(child), 0) / childNodes.length
+      : centerline;
+    const corridorTarget = centerline + (codeJitter(node.course.code) - 0.5) * FOUNDATION_LANE_SPACING;
+    const desired = parentY * 0.5 + corridorTarget * 0.3 + descendantY * 0.2;
+    const lanes = FOUNDATION_LANES.map((lane) => centerline + lane * FOUNDATION_LANE_SPACING)
+      .sort((left, right) => Math.abs(left - desired) - Math.abs(right - desired));
+    const laneIsFree = (candidate: number, candidateX = node.x) => !placed.some((other) => {
+      const horizontalConflict = candidateX < other.x + other.width + 24 && candidateX + node.width + 24 > other.x;
+      return horizontalConflict && Math.abs(candidate - (targets.get(other.course.code) ?? centerY(other))) < requiredVerticalDistance(node, other);
+    });
+    let chosen = lanes.find((candidate) => laneIsFree(candidate));
+    if (chosen === undefined) {
+      // A dense center expands locally before a foundation course is allowed to
+      // fall out of its corridor. Positive staggering preserves edge direction.
+      for (const xShift of [72, 144, 216, 288]) {
+        const candidateX = node.x + xShift;
+        const lane = lanes.find((candidate) => laneIsFree(candidate, candidateX));
+        if (lane !== undefined) {
+          node.x = candidateX;
+          chosen = lane;
+          break;
+        }
+      }
+    }
+    chosen ??= lanes[0];
+    targets.set(node.course.code, chosen);
+    placed.push(node);
+  });
+  return targets;
 }
 
 function crossingCount(nodes: CurriculumGraphNode[], edges: CurriculumGraphEdge[]): number {
@@ -188,11 +358,14 @@ function resolveCollisions(nodes: CurriculumGraphNode[]) {
         const a = ordered[aIndex];
         const b = ordered[bIndex];
         const horizontalOverlap = a.x < b.x + b.width + 24 && a.x + a.width + 24 > b.x;
-        const verticalOverlap = a.y < b.y + b.height + VERTICAL_GAP && a.y + a.height + VERTICAL_GAP > b.y;
+        const verticalOverlap = Math.abs(centerY(a) - centerY(b)) < requiredVerticalDistance(a, b);
         if (!horizontalOverlap || !verticalOverlap) continue;
-        const movable = a.importanceScore <= b.importanceScore ? a : b;
+        const movable = nodeStability(a) <= nodeStability(b) ? a : b;
         const anchor = movable === a ? b : a;
-        movable.y = Math.max(movable.y, anchor.y + anchor.height + VERTICAL_GAP);
+        const distance = requiredVerticalDistance(movable, anchor);
+        const above = centerY(anchor) - distance - movable.height / 2;
+        const below = centerY(anchor) + distance - movable.height / 2;
+        movable.y = above >= CANVAS_PADDING && Math.abs(above - movable.y) < Math.abs(below - movable.y) ? above : below;
         moved = true;
       }
     }
@@ -215,43 +388,59 @@ function rectanglesOverlap(left: CurriculumGraphRect, right: CurriculumGraphRect
     && left.y + left.height + padding > right.y;
 }
 
+function connectorCrossesRect(edge: CurriculumGraphEdge, rect: CurriculumGraphRect, padding = 12) {
+  const expanded = { x: rect.x - padding, y: rect.y - padding, width: rect.width + padding * 2, height: rect.height + padding * 2 };
+  const points = edge.points ?? [];
+  for (let index = 1; index < points.length; index += 1) {
+    const left = points[index - 1];
+    const right = points[index];
+    const minX = Math.min(left.x, right.x);
+    const maxX = Math.max(left.x, right.x);
+    const minY = Math.min(left.y, right.y);
+    const maxY = Math.max(left.y, right.y);
+    if (maxX >= expanded.x && minX <= expanded.x + expanded.width && maxY >= expanded.y && minY <= expanded.y + expanded.height) return true;
+  }
+  return false;
+}
+
 function placeFieldLabel(
   members: CurriculumGraphNode[],
   fieldBounds: CurriculumGraphRect,
   allNodes: CurriculumGraphNode[],
   occupiedLabels: CurriculumGraphRect[],
+  routedEdges: CurriculumGraphEdge[],
 ): CurriculumGraphRect {
-  const width = 430;
-  const height = 82;
+  const width = Math.max(330, Math.min(430, fieldBounds.width * 0.5));
+  const height = 68;
   const minX = Math.min(...members.map((node) => node.x));
   const maxX = Math.max(...members.map((node) => node.x + node.width));
   const minY = Math.min(...members.map((node) => node.y));
   const maxY = Math.max(...members.map((node) => node.y + node.height));
   const centerX = (minX + maxX) / 2;
   const centerYValue = (minY + maxY) / 2;
+  const regionTop = fieldBounds.y + 20;
+  const regionLeft = fieldBounds.x + 24;
+  const regionRight = fieldBounds.x + fieldBounds.width - width - 24;
   const candidates = [
-    { x: centerX - width / 2, y: minY - height - 34, width, height },
-    { x: centerX - width / 2, y: minY - height * 2 - 68, width, height },
-    { x: minX, y: minY - height - 34, width, height },
-    { x: minX - width * 0.55, y: minY - height - 34, width, height },
-    { x: maxX - width, y: minY - height - 34, width, height },
-    { x: maxX - width * 0.45, y: minY - height - 34, width, height },
-    { x: minX - width - 42, y: centerYValue - height / 2, width, height },
-    { x: minX - width - 42, y: centerYValue - height * 1.7, width, height },
-    { x: minX - width - 42, y: centerYValue + height * 0.7, width, height },
-    { x: maxX + 42, y: centerYValue - height / 2, width, height },
-    { x: maxX + 42, y: centerYValue - height * 1.7, width, height },
-    { x: maxX + 42, y: centerYValue + height * 0.7, width, height },
-    { x: centerX - width / 2, y: maxY + 34, width, height },
-    { x: centerX - width / 2, y: maxY + height + 68, width, height },
-    { x: fieldBounds.x + 30, y: fieldBounds.y + 20, width, height },
+    // Stable preferred anchors: top-left, top-center, top-right, then left-center.
+    { x: regionLeft, y: regionTop, width, height },
+    { x: centerX - width / 2, y: regionTop, width, height },
+    { x: regionRight, y: regionTop, width, height },
+    { x: regionLeft, y: centerYValue - height / 2, width, height },
+    { x: regionLeft, y: regionTop + height + 24, width, height },
+    { x: centerX - width / 2, y: regionTop + height + 24, width, height },
+    { x: regionRight, y: regionTop + height + 24, width, height },
+    { x: minX - width - 38, y: centerYValue - height / 2, width, height },
+    { x: maxX + 38, y: centerYValue - height / 2, width, height },
   ].map((candidate) => ({ ...candidate, x: Math.max(24, candidate.x), y: Math.max(24, candidate.y) }));
   const score = (candidate: CurriculumGraphRect) => allNodes.reduce((total, node) => total + (rectanglesOverlap(candidate, node, 18) ? 1000 : 0), 0)
     + occupiedLabels.reduce((total, label) => total + (rectanglesOverlap(candidate, label, 18) ? 800 : 0), 0)
+    + routedEdges.reduce((total, edge) => total + (connectorCrossesRect(edge, candidate) ? 220 + (edge.prominence ?? 0) * 520 : 0), 0)
     + Math.abs((candidate.x + width / 2) - centerX) * 0.04
     + Math.abs((candidate.y + height / 2) - centerYValue) * 0.02;
   const clear = (candidate: CurriculumGraphRect) => !allNodes.some((node) => rectanglesOverlap(candidate, node, 18))
-    && !occupiedLabels.some((label) => rectanglesOverlap(candidate, label, 18));
+    && !occupiedLabels.some((label) => rectanglesOverlap(candidate, label, 18))
+    && !routedEdges.some((edge) => (edge.prominence ?? 0) >= 0.55 && connectorCrossesRect(edge, candidate));
   const orderedCandidates = [...candidates].sort((left, right) => score(left) - score(right));
   const preferred = orderedCandidates.find(clear);
   if (preferred) return preferred;
@@ -342,6 +531,12 @@ export interface CurriculumLayoutResult {
   height: number;
   crossingCountBefore: number;
   crossingCountAfter: number;
+  foundationBackbone: {
+    centerY: number;
+    corridorHalfHeight: number;
+    nodeCodes: string[];
+    rankExpansion: Record<string, number>;
+  };
 }
 
 export function calculateCurriculumLayout(
@@ -350,6 +545,7 @@ export function calculateCurriculumLayout(
   fieldDefinitions: CurriculumFieldDefinition[],
   termOrder: Map<string, number>,
   firstTermId?: string,
+  difficultCourseCodes: Set<string> = new Set(),
 ): CurriculumLayoutResult {
   const fieldPlacement = calculateFieldPlacement(analysis, edges, fieldDefinitions);
   const maxTermOrder = Math.max(1, ...termOrder.values());
@@ -386,7 +582,8 @@ export function calculateCurriculumLayout(
       importanceScore: analyzed.importanceScore,
       importance: analyzed.importance,
       milestoneKind: analyzed.milestoneKind,
-      difficult: false,
+      difficult: difficultCourseCodes.has(code),
+      challenging: Boolean(analyzed.course.challenging),
       rank: analyzed.metrics.prerequisiteDepth,
       layoutRank,
       x,
@@ -397,7 +594,8 @@ export function calculateCurriculumLayout(
     nodes.push(node);
     byCode.set(code, node);
   });
-  const centerline = [...fieldPlacement.centers.values()].reduce((sum, value) => sum + value, 0) / Math.max(1, fieldPlacement.centers.size);
+  const rankExpansion = applyDensityAwareHorizontalExpansion(nodes, predecessors, analysis.topologicalOrder);
+  const centerline = fieldPlacement.centerline;
   const starterTargets = new Map<string, number>();
   const starters = nodes
     .filter((node) => node.course.originalTermId === firstTermId)
@@ -423,10 +621,21 @@ export function calculateCurriculumLayout(
     const fieldCenter = fieldPlacement.centers.get(node.fieldId) ?? centerline;
     const fieldImportance = Math.min(1, (fieldPlacement.importance.get(node.fieldId) ?? 0) / 1.35);
     const branchOffset = (codeJitter(node.course.code) - 0.5) * 86;
-    const fieldY = fieldCenter + branchOffset;
-    const centralPull = Math.min(0.68, node.importanceScore * 0.32 + fieldImportance * 0.3);
+    const fieldY = fieldCenter + branchOffset * fieldAttractionFactor(node);
+    const centralPull = Math.min(0.8, node.importanceScore * 0.28 + fieldImportance * 0.26
+      + node.metrics.foundationalWeight * 0.3 + node.metrics.foundationInfluence * 0.28);
     initialDesired.set(node.course.code, centerline + (fieldY - centerline) * (1 - centralPull));
   });
+  [...layers.keys()].sort((left, right) => left - right).forEach((rank) => packLayer(layers.get(rank) ?? [], initialDesired));
+  const foundationTargets = chooseFoundationLaneTargets(nodes, predecessors, dependents, centerline);
+  analysis.topologicalOrder.forEach((code) => {
+    const node = byCode.get(code);
+    if (!node) return;
+    const parents = (predecessors.get(code) ?? []).flatMap((parent) => byCode.get(parent) ? [byCode.get(parent) as CurriculumGraphNode] : []);
+    if (parents.length > 0) node.x = Math.max(node.x, ...parents.map((parent) => parent.x + parent.width + HORIZONTAL_GAP));
+  });
+  const foundationSources = foundationLineage(nodes, dependents);
+  foundationTargets.forEach((target, code) => initialDesired.set(code, target));
   [...layers.keys()].sort((left, right) => left - right).forEach((rank) => packLayer(layers.get(rank) ?? [], initialDesired));
   const crossingCountBefore = crossingCount(nodes, edges);
   let bestCrossings = crossingCountBefore;
@@ -450,12 +659,34 @@ export function calculateCurriculumLayout(
         const relationY = relatedNodes.length > 0
           ? relatedNodes.reduce((sum, related) => sum + centerY(related), 0) / relatedNodes.length
           : fieldPlacement.centers.get(node.fieldId) ?? centerline;
-        const fieldY = fieldPlacement.centers.get(node.fieldId) ?? centerline;
+        const rawFieldY = fieldPlacement.centers.get(node.fieldId) ?? centerline;
+        const fieldFactor = fieldAttractionFactor(node);
+        const fieldY = centerline + (rawFieldY - centerline) * fieldFactor;
         const fieldImportance = Math.min(1, (fieldPlacement.importance.get(node.fieldId) ?? 0) / 1.35);
-        const stability = node.importanceScore * 0.18;
-        let targetY = relationY * 0.65 + fieldY * (0.35 - stability) + centerY(node) * stability;
-        const centralPull = Math.min(0.66, node.importanceScore * 0.3 + fieldImportance * 0.32);
-        targetY = centerline + (targetY - centerline) * (1 - centralPull);
+        const stability = Math.min(0.34, nodeStability(node) * 0.045);
+        const fieldWeight = 0.35 * fieldFactor;
+        let targetY = relationY * (1 - fieldWeight) + fieldY * fieldWeight;
+        targetY = targetY * (1 - stability) + centerY(node) * stability;
+        if (foundationTargets.has(node.course.code)) {
+          const foundationTarget = foundationTargets.get(node.course.code) as number;
+          targetY = foundationTarget * 0.76 + targetY * 0.24;
+        } else {
+          const sources = foundationSources.get(node.course.code) ?? [];
+          if (sources.length > 0) {
+            const weighted = sources.flatMap((source) => {
+              const foundation = byCode.get(source.sourceCode);
+              return foundation ? [{ y: centerY(foundation), weight: Math.max(0.15, foundation.metrics.foundationCentrality) / source.distance }] : [];
+            });
+            if (weighted.length > 0) {
+              const attractionY = weighted.reduce((sum, item) => sum + item.y * item.weight, 0) / weighted.reduce((sum, item) => sum + item.weight, 0);
+              const nearest = Math.min(...sources.map((source) => source.distance));
+              const attraction = nearest === 1 ? 0.35 : nearest === 2 ? 0.22 : nearest === 3 ? 0.12 : 0;
+              targetY = targetY * (1 - attraction) + attractionY * attraction;
+            }
+          }
+          const centralPull = Math.min(0.5, node.importanceScore * 0.18 + fieldImportance * 0.12 + node.metrics.foundationInfluence * 0.2);
+          targetY = centerline + (targetY - centerline) * (1 - centralPull);
+        }
         desired.set(node.course.code, targetY);
       });
       packLayer(layer, desired);
@@ -469,6 +700,8 @@ export function calculateCurriculumLayout(
     }
   }
   nodes.forEach((node) => { node.y = bestY.get(node.course.code) ?? node.y; });
+  const finalDesired = new Map(nodes.map((node) => [node.course.code, foundationTargets.get(node.course.code) ?? centerY(node)]));
+  orderedRanks.forEach((rank) => packLayer(layers.get(rank) ?? [], finalDesired));
   resolveCollisions(nodes);
   const minY = Math.min(...nodes.map((node) => node.y));
   if (minY < CANVAS_PADDING) nodes.forEach((node) => { node.y += CANVAS_PADDING - minY; });
@@ -482,7 +715,7 @@ export function calculateCurriculumLayout(
     // later branch so they do not compete with the launch area.
     const branchMembers = members.filter((node) => node.course.originalTermId !== firstTermId);
     const bounds = boundsFor(branchMembers.length > 0 ? branchMembers : members, 78, 126);
-    const labelBounds = placeFieldLabel(branchMembers.length > 0 ? branchMembers : members, bounds, nodes, occupiedLabels);
+    const labelBounds = placeFieldLabel(branchMembers.length > 0 ? branchMembers : members, bounds, nodes, occupiedLabels, routedEdges);
     occupiedLabels.push(labelBounds);
     return [{
       ...definition,
@@ -495,7 +728,22 @@ export function calculateCurriculumLayout(
   const startingRegion = starters.length > 0 ? boundsFor(starters, 34, 58) : { x: CANVAS_PADDING - 30, y: CANVAS_PADDING - 30, width: 250, height: 250 };
   const width = Math.max(...nodes.map((node) => node.x + node.width), ...fields.map((field) => field.bounds.x + field.bounds.width), ...fields.map((field) => field.labelBounds.x + field.labelBounds.width)) + CANVAS_PADDING;
   const height = Math.max(provisionalHeight, ...fields.map((field) => field.bounds.y + field.bounds.height), ...fields.map((field) => field.labelBounds.y + field.labelBounds.height)) + CANVAS_PADDING;
-  return { nodes, fields, edges: routedEdges, startingRegion, width, height, crossingCountBefore, crossingCountAfter: crossingCount(nodes, edges) };
+  return {
+    nodes,
+    fields,
+    edges: routedEdges,
+    startingRegion,
+    width,
+    height,
+    crossingCountBefore,
+    crossingCountAfter: crossingCount(nodes, edges),
+    foundationBackbone: {
+      centerY: centerline,
+      corridorHalfHeight: FOUNDATION_CORRIDOR_HALF_HEIGHT,
+      nodeCodes: nodes.filter(isFoundationNode).map((node) => node.course.code),
+      rankExpansion: Object.fromEntries([...rankExpansion].map(([rank, expansion]) => [String(rank), expansion])),
+    },
+  };
 }
 
 export function graphNodesOverlap(nodes: CurriculumGraphNode[]): boolean {

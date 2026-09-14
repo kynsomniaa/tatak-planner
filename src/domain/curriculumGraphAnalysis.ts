@@ -1,4 +1,4 @@
-import { Course } from '../types';
+import { Course, CourseRole } from '../types';
 import type {
   CourseImportance,
   CourseMilestoneKind,
@@ -25,6 +25,13 @@ export interface CurriculumGraphAnalysis {
 
 const logarithmicNormalize = (value: number, maximum: number) =>
   maximum <= 0 ? 0 : Math.log1p(value) / Math.log1p(maximum);
+
+/** Metadata-only foundation membership. Layout code never inspects course names. */
+export function isFoundationBackbone(course: Course): boolean {
+  return course.courseRole === 'foundation'
+    || course.courseRole === 'core_gateway'
+    || (course.foundationalWeight ?? 0) >= 0.65;
+}
 
 function findCycles(courseCodes: string[], dependents: Map<string, string[]>): string[][] {
   const state = new Map<string, 0 | 1 | 2>();
@@ -96,8 +103,10 @@ function distancesToTargets(targets: string[], prerequisites: Map<string, string
   return distances;
 }
 
-function importanceTier(score: number, milestone: number): CourseImportance {
+function importanceTier(score: number, milestone: number, role: CourseRole): CourseImportance {
   if (milestone >= 0.7 || score > 0.75) return 'major';
+  if (role === 'core_gateway') return 'large';
+  if (role === 'foundation' && score < 0.3) return 'medium';
   if (milestone >= 0.5 || score >= 0.55) return 'large';
   if (score >= 0.3) return 'medium';
   return 'normal';
@@ -171,6 +180,19 @@ export function analyzeCurriculumGraph(
     const fieldId = fields.get(course.code) ?? 'general-communication';
     const direct = new Set(dependents.get(course.code) ?? []).size;
     const descendants = allDescendants(course.code, dependents);
+    const coreDescendantCount = [...descendants].filter((code) => {
+      const descendantField = fields.get(code);
+      return descendantField !== undefined && [
+        'programming-software',
+        'circuits-electronics',
+        'cpe-core',
+        'hardware-embedded',
+        'networks-systems',
+        'design-thesis',
+        'internship',
+      ].includes(descendantField);
+    }).length;
+    const milestoneDescendantCount = [...descendants].filter((code) => milestoneKinds.get(code) !== null).length;
     const neighborFields = new Set([
       ...(prerequisites.get(course.code) ?? []).map((code) => fields.get(code)),
       ...(dependents.get(course.code) ?? []).map((code) => fields.get(code)),
@@ -188,6 +210,9 @@ export function analyzeCurriculumGraph(
       downstreamCount: descendants.size,
       prerequisiteDepth: prerequisiteDepth.get(course.code) ?? 0,
       downstreamDepth: downstreamDepth.get(course.code) ?? 0,
+      coreDescendantCount,
+      milestoneDescendantCount,
+      downstreamFieldCount: downstreamFields.size,
       bridgeRaw,
       milestoneKind: kind,
       milestoneWeight: milestoneWeight(course, fieldId, kind),
@@ -200,7 +225,34 @@ export function analyzeCurriculumGraph(
     downstream: Math.max(0, ...raw.map((item) => item.downstreamCount)),
     depth: Math.max(0, ...raw.map((item) => item.downstreamDepth)),
     bridge: Math.max(0, ...raw.map((item) => item.bridgeRaw)),
+    coreDescendants: Math.max(0, ...raw.map((item) => item.coreDescendantCount)),
+    milestoneDescendants: Math.max(0, ...raw.map((item) => item.milestoneDescendantCount)),
   };
+
+  const foundationalWeights = new Map<string, number>();
+  raw.forEach((item) => {
+    const order = termOrder.get(item.course.originalTermId) ?? Number.MAX_SAFE_INTEGER;
+    const early = Math.max(0, 1 - order / 5);
+    const structural = 0.45 * logarithmicNormalize(item.downstreamCount, maxima.downstream)
+      + 0.35 * (maxima.depth === 0 ? 0 : item.downstreamDepth / maxima.depth)
+      + 0.2 * Math.min(1, item.downstreamFieldCount / 3);
+    const inferred = order <= 2 && item.downstreamDepth >= 2 ? early * structural * 0.72 : 0;
+    foundationalWeights.set(item.course.code, Math.max(item.course.foundationalWeight ?? 0, inferred));
+  });
+  const foundationInfluence = new Map(codes.map((code) => [code, 0]));
+  foundationalWeights.forEach((weight, source) => {
+    if (weight <= 0) return;
+    const queue = [{ code: source, distance: 0 }];
+    const seen = new Map<string, number>();
+    while (queue.length > 0) {
+      const current = queue.shift() as { code: string; distance: number };
+      if ((seen.get(current.code) ?? Number.MAX_SAFE_INTEGER) <= current.distance) continue;
+      seen.set(current.code, current.distance);
+      const influence = weight / (1 + current.distance * 0.32);
+      foundationInfluence.set(current.code, Math.max(foundationInfluence.get(current.code) ?? 0, influence));
+      (dependents.get(current.code) ?? []).forEach((code) => queue.push({ code, distance: current.distance + 1 }));
+    }
+  });
 
   const analyzed = new Map<string, AnalyzedCourse>();
   raw.forEach((item) => {
@@ -210,6 +262,15 @@ export function analyzeCurriculumGraph(
     const bridgeScore = logarithmicNormalize(item.bridgeRaw, maxima.bridge);
     const thesisProximity = item.distanceToThesis === null ? 0 : 1 / (1 + item.distanceToThesis * 0.5);
     const internshipProximity = item.distanceToInternship === null ? 0 : 1 / (1 + item.distanceToInternship * 0.6);
+    const foundationalWeight = foundationalWeights.get(item.course.code) ?? 0;
+    const inheritedFoundation = foundationInfluence.get(item.course.code) ?? 0;
+    const foundationCentrality = isFoundationBackbone(item.course) ? Math.min(1,
+      0.30 * normalizedDownstream
+      + 0.25 * normalizedDepth
+      + 0.20 * logarithmicNormalize(item.coreDescendantCount, maxima.coreDescendants)
+      + 0.15 * logarithmicNormalize(item.milestoneDescendantCount, maxima.milestoneDescendants)
+      + 0.10 * foundationalWeight,
+    ) : 0;
     const importanceScore = Math.min(1,
       0.2 * normalizedDirect
       + 0.25 * normalizedDownstream
@@ -217,7 +278,9 @@ export function analyzeCurriculumGraph(
       + 0.15 * bridgeScore
       + 0.2 * item.milestoneWeight
       + 0.08 * thesisProximity
-      + 0.035 * internshipProximity,
+      + 0.035 * internshipProximity
+      + 0.23 * foundationalWeight
+      + 0.07 * inheritedFoundation,
     );
     const metrics: CurriculumGraphMetrics = {
       directDependents: item.directDependents,
@@ -226,6 +289,9 @@ export function analyzeCurriculumGraph(
       downstreamDepth: item.downstreamDepth,
       bridgeScore,
       milestoneWeight: item.milestoneWeight,
+      foundationalWeight,
+      foundationInfluence: inheritedFoundation,
+      foundationCentrality,
       isThesisAncestor: item.distanceToThesis !== null && item.distanceToThesis > 0,
       distanceToThesis: item.distanceToThesis,
       isInternshipAncestor: item.distanceToInternship !== null && item.distanceToInternship > 0,
@@ -236,7 +302,7 @@ export function analyzeCurriculumGraph(
       fieldId: item.fieldId,
       metrics,
       importanceScore,
-      importance: importanceTier(importanceScore, item.milestoneWeight),
+      importance: importanceTier(importanceScore, item.milestoneWeight, item.course.courseRole ?? 'standard'),
       milestoneKind: item.milestoneKind,
     });
   });
