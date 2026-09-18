@@ -265,7 +265,7 @@ export function CurriculumMapViewport({ contentWidth, contentHeight, focus, drag
   const centeredOffsetY = Math.max(0, (viewport.height - contentHeight * zoom) / 2);
   return (
     <View ref={wrapperRef} style={[styles.wrapper, { backgroundColor: theme.canvas }, fullscreen && styles.fullscreen, dragging && styles.wrapperDragging]}>
-      <View style={[styles.controls, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+      <View nativeID="tour-map-controls" style={[styles.controls, { backgroundColor: theme.surface, borderColor: theme.border }]}>
         <Text style={[styles.handHint, { color: panning ? theme.green700 : theme.muted }]}>{panning ? '✋ Roaming map…' : 'Drag empty space to roam · Ctrl/⌘ + wheel to zoom'}</Text>
         <Pressable onPress={() => applyZoom(zoom - 0.1)} style={[styles.control, { backgroundColor: theme.canvas }]}><Text style={[styles.controlText, { color: theme.ink }]}>−</Text></Pressable>
         <Text style={[styles.zoom, { color: theme.ink }]}>{Math.round(zoom * 100)}%</Text>

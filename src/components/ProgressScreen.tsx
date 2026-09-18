@@ -57,10 +57,9 @@ export function ProgressScreen({ workspace, onChange }: { workspace: StudentWork
   };
 
   return (
-    <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.canvas }]}>
-      <Text style={[styles.eyebrow, { color: theme.green700 }]}>PROGRESS & GRADES</Text>
-      <Text style={[styles.title, { color: theme.ink }]}>Keep your academic record current</Text>
-      <Text style={[styles.subtitle, { color: theme.muted }]}>Tap a course tile to move it through Pending, Active, and Passed. Active and Passed always require completed prerequisites.</Text>
+    <ScrollView nativeID="tour-progress" contentContainerStyle={[styles.page, { backgroundColor: theme.canvas }]}>
+      <Text style={[styles.eyebrow, { color: theme.green700 }]}>02 // ACADEMIC RECORD</Text>
+      <Text style={[styles.title, { color: theme.ink }]}>Progress & grades</Text>
 
       <View style={[styles.progressCard, { backgroundColor: theme.green900 }]}>
         <View style={styles.progressCopy}><Text style={[styles.progressValue, { color: contrastText(theme.green900) }]}>{passedUnits}</Text><Text style={[styles.progressLabel, { color: contrastText(theme.green900) }]}>of {totalUnits} units passed</Text></View>

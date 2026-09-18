@@ -68,10 +68,11 @@ const fieldAccent = (field: CurriculumFieldId, theme: ReturnType<typeof useAppTh
   return theme.arrowCpe;
 };
 
-export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
+export function CurriculumRaidScreen({ workspace, onChange, ratings, tourStage }: {
   workspace: StudentWorkspace;
   onChange: (workspace: StudentWorkspace) => void;
   ratings: CourseRating[];
+  tourStage?: string;
 }) {
   const theme = useAppTheme();
   const { width: windowWidth } = useWindowDimensions();
@@ -168,6 +169,23 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
     });
     setRaidFocus(null);
   }, [curriculum.id]);
+
+  useEffect(() => {
+    if (tourStage === 'curriculum' || tourStage === 'states' || tourStage === 'controls' || tourStage === 'paths') {
+      setRaidOpen(false);
+      setRaidFocus(null);
+    }
+    if (tourStage === 'raid-planner' || tourStage === 'raids' || tourStage === 'strategies') {
+      setRaidOpen(true);
+      setRaidFocus(null);
+      setSelectedCourseCode(null);
+    }
+    if (tourStage === 'paths') {
+      const routeCourse = graph.nodes.find((node) => node.course.prerequisites.length > 0 && courseDepartment(node.course.code) === 'CPE')
+        ?? graph.nodes.find((node) => node.course.prerequisites.length > 0);
+      if (routeCourse) setSelectedCourseCode(routeCourse.course.code);
+    }
+  }, [tourStage, graph]);
 
   const bundleStatus = (course: Course): CourseStatus => {
     const statuses = courseBundleCodes(curriculum, course.code).map((code) => workspace.statuses[code] ?? 'pending');
@@ -271,14 +289,14 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
     <DropProvider>
       <View style={[styles.page, { backgroundColor: theme.canvas }]}>
         <View style={[styles.hero, mobile && styles.heroMobile, { backgroundColor: theme.green900 }]}>
-          <View style={styles.heroCopy}><Text style={[styles.eyebrow, { color: theme.gold }]}>DEGREE EXPEDITION</Text><Text style={[styles.title, { color: contrastText(theme.green900) }]}>Curriculum Map</Text><Text style={[styles.subtitle, { color: contrastText(theme.green900) }]}>Explore connected fields, conquer courses, and assemble your next trimester raid.</Text><View style={styles.mapProgressRow}><Text style={[styles.mapProgressLabel, { color: contrastText(theme.green900) }]}>Degree progress · {progressPercent}%</Text><View style={[styles.mapProgressTrack, { backgroundColor: theme.green800 }]}><View style={[styles.mapProgressFill, { width: `${progressPercent}%`, backgroundColor: theme.gold }]} /></View></View></View>
+          <View style={styles.heroCopy}><Text style={[styles.eyebrow, { color: theme.gold }]}>01 // DEGREE ROUTE</Text><Text style={[styles.title, { color: contrastText(theme.green900) }]}>Curriculum Map</Text><View style={styles.mapProgressRow}><Text style={[styles.mapProgressLabel, { color: contrastText(theme.green900) }]}>Degree progress · {progressPercent}%</Text><View style={[styles.mapProgressTrack, { backgroundColor: theme.green800 }]}><View style={[styles.mapProgressFill, { width: `${progressPercent}%`, backgroundColor: theme.gold }]} /></View></View></View>
           <View style={styles.heroActions}>
-            <Pressable onPress={() => setShowEveryArrow((value) => !value)} style={[styles.heroButton, { backgroundColor: showEveryArrow ? theme.gold : theme.surface, borderColor: theme.border }]}><Text style={[styles.heroButtonText, { color: showEveryArrow ? contrastText(theme.gold) : theme.ink }]}>{showEveryArrow ? 'Every arrow on' : 'Show every arrow'}</Text></Pressable>
+            <Pressable nativeID="tour-path-tools" onPress={() => setShowEveryArrow((value) => !value)} style={[styles.heroButton, { backgroundColor: showEveryArrow ? theme.gold : theme.surface, borderColor: theme.border }]}><Text style={[styles.heroButtonText, { color: showEveryArrow ? contrastText(theme.gold) : theme.ink }]}>{showEveryArrow ? 'Every arrow on' : 'Show every arrow'}</Text></Pressable>
             <Pressable onPress={() => raidFocus ? exitRaidFocus() : setRaidOpen(true)} style={[styles.raidButton, { backgroundColor: theme.gold }]}><Text style={[styles.raidButtonText, { color: contrastText(theme.gold) }]}>{raidFocus ? '← Return to Raid Planner' : '⚔ Raid Planner'}</Text></Pressable>
           </View>
         </View>
         <View style={styles.body}>
-          <View style={[styles.mapPane, draggingId && styles.mapPaneDragging]}>
+          <View nativeID="tour-curriculum-map" style={[styles.mapPane, draggingId && styles.mapPaneDragging]}>
             <CurriculumMapViewport contentWidth={graph.width} contentHeight={graph.height} focus={focus} dragging={Boolean(draggingId)} onCameraChange={(camera) => { cameraRef.current = camera; }}>
               {(panHandlers, panning) => (
                 <View style={[styles.mapCanvas, { width: graph.width, height: graph.height }]}>
@@ -324,7 +342,7 @@ export function CurriculumRaidScreen({ workspace, onChange, ratings }: {
                       onDragState={(state) => { if (state === DraggableState.IDLE || state === DraggableState.DROPPED) setDraggingId(null); }}
                     />;
                   })}
-                  <View style={[styles.mapLegend, { left: 80, top: 40, backgroundColor: theme.surface, borderColor: theme.border }]}>
+                  <View nativeID="tour-node-states" style={[styles.mapLegend, { left: 80, top: 40, backgroundColor: theme.surface, borderColor: theme.border }]}>
                     <LegendDot color={theme.green700} label="Conquered" />
                     <LegendDot color={theme.active} label="Active now" />
                     <LegendDot color={theme.gold} label="Planned raid" />
@@ -518,12 +536,12 @@ function RaidPlanner({ open, mobile, columns, workspace, raids, selectedRaid, av
   const raidNumber = selectedRaid ? selectedRaid.order + 1 : 1;
   return (
     <View style={[styles.raidPanel, mobile && styles.raidPanelMobile, draggingId && styles.raidPanelDragging, { backgroundColor: theme.surface, borderColor: theme.border, shadowColor: theme.green900 }]}>
-      <View style={[styles.raidHeader, { backgroundColor: theme.green900 }]}>
+      <View nativeID="tour-raid-planner" style={[styles.raidHeader, { backgroundColor: theme.green900 }]}>
         <View style={styles.raidHeaderCopy}><Text style={[styles.raidEyebrow, { color: theme.gold }]}>PLAN THE NEXT EXPEDITION</Text><Text style={[styles.raidTitle, { color: contrastText(theme.green900) }]}>Raid Planner</Text></View>
         <Pressable onPress={onNewRaid} style={[styles.newRaid, { backgroundColor: theme.gold }]}><Text style={[styles.newRaidText, { color: contrastText(theme.gold) }]}>＋ New raid</Text></Pressable>
         <Pressable onPress={() => onOpenChange(false)} style={[styles.collapseRaid, { backgroundColor: theme.green800 }]}><Text style={[styles.collapseRaidText, { color: contrastText(theme.green800) }]}>{mobile ? '↓' : '›'}</Text></Pressable>
       </View>
-      <ScrollView style={styles.raidTabScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.raidTabs}>
+      <ScrollView nativeID="tour-raids" style={styles.raidTabScroll} horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.raidTabs}>
         {raids.map((term) => {
           const active = term.id === selectedRaid?.id;
           const current = term.id === currentRaidId;
@@ -535,8 +553,8 @@ function RaidPlanner({ open, mobile, columns, workspace, raids, selectedRaid, av
         })}
       </ScrollView>
       {selectedRaid && <>
-        <View style={[styles.strategyBar, { borderBottomColor: theme.border }]}>
-          <View style={styles.strategyIntro}><Text style={[styles.strategyTitle, { color: theme.ink }]}>Tatak Plan strategies</Text><Text style={[styles.strategyHelp, { color: theme.muted }]}>Highlight a route and compare strictly eligible next courses.</Text></View>
+        <View nativeID="tour-strategies" style={[styles.strategyBar, { borderBottomColor: theme.border }]}>
+          <View style={styles.strategyIntro}><Text style={[styles.strategyTitle, { color: theme.ink }]}>Raid strategies</Text><Text style={[styles.strategyHelp, { color: theme.muted }]}>Highlight a route and compare strictly eligible next courses.</Text></View>
           <View style={styles.strategyButtons}>
             {([
               ['thesis', 'Thesis Priority'],

@@ -1,4 +1,4 @@
-# CpE Pathfinder
+# TAM // CORE
 
 Android-first curriculum planning prototype for FEU Institute of Technology students. This version ships with a maintained BSCpE curriculum and turns the official sequence into a clustered prerequisite map with a personal, persistent Raid Planner.
 

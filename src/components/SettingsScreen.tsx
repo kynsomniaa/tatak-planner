@@ -20,21 +20,22 @@ export function SettingsScreen({
   onChange,
   onReplaceCurriculum,
   onSignOut,
+  onReplayTutorial,
 }: {
   session: AppSession;
   workspace: StudentWorkspace;
   onChange: (workspace: StudentWorkspace) => void;
   onReplaceCurriculum: () => void;
   onSignOut: () => void;
+  onReplayTutorial: () => void;
 }) {
   const theme = useAppTheme();
   const curriculum = workspace.curriculum;
   const selectedTheme = workspace.preferences?.theme ?? 'feu-green';
   return (
-    <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.canvas }]}>
-      <Text style={[styles.eyebrow, { color: theme.green700 }]}>SETTINGS</Text>
-      <Text style={[styles.title, { color: theme.ink }]}>Your planner</Text>
-      <Text style={[styles.subtitle, { color: theme.muted }]}>Account, appearance, program curriculum, and integration status.</Text>
+    <ScrollView nativeID="tour-settings" contentContainerStyle={[styles.page, { backgroundColor: theme.canvas }]}>
+      <Text style={[styles.eyebrow, { color: theme.green700 }]}>04 // SETTINGS</Text>
+      <Text style={[styles.title, { color: theme.ink }]}>Settings</Text>
 
       <View style={[styles.profile, { backgroundColor: theme.green900 }]}>
         <View style={[styles.avatar, { backgroundColor: theme.gold }]}><Text style={[styles.avatarText, { color: contrastText(theme.gold) }]}>{session.username[0]?.toUpperCase()}</Text></View>
@@ -90,6 +91,14 @@ export function SettingsScreen({
         <Connection label="Local preview fallback" active={!cloudConfigured} last />
       </View>
 
+      <Text style={[styles.sectionTitle, { color: theme.ink }]}>Guidance</Text>
+      <View style={[styles.card, { backgroundColor: theme.surface, borderColor: theme.border }]}>
+        <View style={styles.guideRow}>
+          <View style={styles.guideCopy}><Text style={[styles.guideTitle, { color: theme.ink }]}>Product walkthrough</Text><Text style={[styles.guideText, { color: theme.muted }]}>Review the map, Raid Planner, Ratings, Progress, and controls without changing your saved plan.</Text></View>
+          <Pressable nativeID="tour-replay" onPress={onReplayTutorial} style={[styles.guideButton, { backgroundColor: theme.gold }]}><Text style={[styles.guideButtonText, { color: contrastText(theme.gold) }]}>Replay walkthrough</Text></Pressable>
+        </View>
+      </View>
+
       <PrimaryButton
         label="Choose a different program"
         tone="light"
@@ -110,7 +119,7 @@ export function SettingsScreen({
       <View style={[styles.notice, { backgroundColor: theme.warningSoft }]}>
         <Text style={[styles.noticeTitle, { color: theme.warning }]}>Unofficial planning aid</Text>
         <Text style={[styles.noticeBody, { color: theme.warning }]}> 
-          CpE Pathfinder does not enroll courses, verify offerings, or replace academic advice. Confirm plans in SOLAR and against current FEU Tech policies.
+          TAM // CORE does not enroll courses, verify offerings, or replace academic advice. Confirm plans in SOLAR and against current FEU Tech policies.
         </Text>
       </View>
     </ScrollView>
@@ -172,6 +181,12 @@ const styles = StyleSheet.create({
   connectedText: { color: colors.green800 },
   notConnectedText: { color: colors.warning },
   button: { marginTop: 12 },
+  guideRow: { paddingVertical: 14, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  guideCopy: { flex: 1 },
+  guideTitle: { fontSize: 12, fontWeight: '900' },
+  guideText: { marginTop: 4, maxWidth: 590, fontSize: 10, lineHeight: 15 },
+  guideButton: { minHeight: 38, paddingHorizontal: 13, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  guideButtonText: { fontSize: 9, fontWeight: '900' },
   notice: { marginTop: 20, padding: 15, backgroundColor: colors.warningSoft, borderRadius: 15 },
   noticeTitle: { color: colors.warning, fontWeight: '900', fontSize: 12 },
   noticeBody: { marginTop: 5, color: colors.warning, fontSize: 11, lineHeight: 17 },

@@ -1,4 +1,4 @@
-# Supabase setup for CpE Pathfinder
+# Supabase setup for TAM // CORE
 
 The app remains in local preview mode until these steps are completed. Username-only accounts intentionally have no email recovery.
 
@@ -11,7 +11,7 @@ The app remains in local preview mode until these steps are completed. Username-
 
 ## 2. Configure username-only password authentication
 
-Supabase password authentication normally uses email or phone. CpE Pathfinder maps each username to an internal, non-deliverable account address that is never shown to students.
+Supabase password authentication normally uses email or phone. TAM // CORE maps each username to an internal, non-deliverable account address that is never shown to students.
 
 1. Open **Authentication → Providers → Email**.
 2. Keep email/password authentication enabled.

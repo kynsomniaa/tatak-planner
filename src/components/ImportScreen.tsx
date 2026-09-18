@@ -21,7 +21,7 @@ export function ImportScreen({ onImported, onBackToLogin }: { onImported: (works
         <View style={[styles.step, { backgroundColor: theme.green100 }]}><Text style={[styles.stepText, { color: contrastText(theme.green100, '#FFFFFF', theme.green900) }]}>ACADEMIC SETUP · 1</Text></View>
         <Text style={[styles.eyebrow, { color: theme.green700 }]}>SELECT YOUR PROGRAM</Text>
         <Text style={[styles.title, { color: theme.ink }]}>Choose your degree route</Text>
-        <Text style={[styles.subtitle, { color: theme.muted }]}>Supported curricula are maintained inside Tatak Planner, so you no longer need to save or upload a SOLAR HTML page.</Text>
+        <Text style={[styles.subtitle, { color: theme.muted }]}>Supported curricula are maintained inside TAM // CORE, so you no longer need to save or upload a SOLAR HTML page.</Text>
 
         <View style={styles.programGrid}>
           {supportedPrograms.map((program) => (

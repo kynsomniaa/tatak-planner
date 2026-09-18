@@ -9,11 +9,13 @@ import { clearWorkspace, loadWorkspace, saveWorkspace } from './src/services/rep
 import { AuthScreen } from './src/components/AuthScreen';
 import { ImportScreen } from './src/components/ImportScreen';
 import { MainShell } from './src/components/MainShell';
+import { markTutorialPending } from './src/domain/tutorial';
 
 export default function App() {
   const [session, setSession] = useState<AppSession | null>(null);
   const [workspace, setWorkspace] = useState<StudentWorkspace | null>(null);
   const [ready, setReady] = useState(false);
+  const [launchTutorial, setLaunchTutorial] = useState(false);
 
   useEffect(() => {
     void (async () => {
@@ -52,7 +54,7 @@ export default function App() {
   if (!ready) {
     return (
       <View style={styles.loading}>
-        <View style={styles.logo}><Text style={styles.logoText}>CP</Text></View>
+        <Text style={styles.logoText}>TAM // CORE</Text>
         <ActivityIndicator color={colors.green800} />
         <Text style={styles.loadingText}>Opening your degree plan…</Text>
       </View>
@@ -67,11 +69,16 @@ export default function App() {
           <AuthScreen onAuthenticated={handleAuthenticated} />
         ) : !workspace?.curriculum ? (
           <ImportScreen
-            onImported={setWorkspace}
+            onImported={(nextWorkspace) => {
+              setWorkspace(nextWorkspace);
+              setLaunchTutorial(true);
+              void markTutorialPending(session.id);
+            }}
             onBackToLogin={() => {
               void signOut().finally(() => {
                 setSession(null);
                 setWorkspace(null);
+                setLaunchTutorial(false);
               });
             }}
           />
@@ -80,6 +87,7 @@ export default function App() {
             session={session}
             workspace={workspace}
             onChange={setWorkspace}
+            launchTutorial={launchTutorial}
             onReplaceCurriculum={() => {
               void clearWorkspace(session).finally(() => setWorkspace(null));
             }}
@@ -87,6 +95,7 @@ export default function App() {
               void signOut().finally(() => {
                 setSession(null);
                 setWorkspace(null);
+                setLaunchTutorial(false);
               });
             }}
           />
@@ -99,7 +108,6 @@ export default function App() {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   loading: { flex: 1, backgroundColor: colors.canvas, alignItems: 'center', justifyContent: 'center' },
-  logo: { width: 54, height: 54, borderRadius: 17, backgroundColor: colors.gold, alignItems: 'center', justifyContent: 'center', marginBottom: 20 },
-  logoText: { color: colors.green900, fontSize: 19, fontWeight: '900' },
+  logoText: { marginBottom: 20, color: colors.green900, fontSize: 19, fontWeight: '900', letterSpacing: 1.5 },
   loadingText: { marginTop: 12, color: colors.muted, fontSize: 12 },
 });

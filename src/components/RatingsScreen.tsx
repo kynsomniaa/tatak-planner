@@ -94,9 +94,10 @@ export function RatingsScreen({ session, workspace }: { session: AppSession; wor
 
   return (
     <ScrollView contentContainerStyle={[styles.page, { backgroundColor: theme.canvas }]}> 
-      <Text style={[styles.eyebrow, { color: theme.green700 }]}>RATE YOUR COURSES</Text>
-      <Text style={[styles.title, { color: theme.ink }]}>Student course experiences</Text>
-      <Text style={[styles.subtitle, { color: theme.muted }]}>Browse every course by department. Publishing requires the course to be marked Passed or Retake.</Text>
+      <View nativeID="tour-ratings-overview">
+        <Text style={[styles.eyebrow, { color: theme.green700 }]}>03 // SCOUT AHEAD</Text>
+        <Text style={[styles.title, { color: theme.ink }]}>Ratings</Text>
+      </View>
 
       {!cloudConfigured && <View style={[styles.previewBanner, { backgroundColor: theme.warningSoft, borderColor: theme.warning }]}><Text style={[styles.previewTitle, { color: theme.warning }]}>Local preview mode</Text><Text style={[styles.previewText, { color: theme.ink }]}>Ratings become shared after Supabase is connected.</Text></View>}
       {showInfo && (
@@ -108,6 +109,10 @@ export function RatingsScreen({ session, workspace }: { session: AppSession; wor
           <Text style={[styles.infoText, { color: theme.ink }]}><Text style={[styles.infoStrong, { color: theme.green700 }]}>Usefulness:</Text> how valuable or relevant the subject felt.</Text>
         </View>
       )}
+      <View nativeID="tour-rating-intel" style={[styles.intelPrompt, { backgroundColor: theme.green100, borderColor: theme.border }]}>
+        <View style={styles.intelStars}><Text style={[styles.intelStar, { color: theme.green700 }]}>★</Text><Text style={[styles.intelStar, { color: theme.green700 }]}>★</Text><Text style={[styles.intelStar, { color: theme.green700 }]}>★</Text></View>
+        <View style={styles.intelCopy}><Text style={[styles.intelTitle, { color: theme.ink }]}>Finished a course? ★ Leave a rating.</Text><Text style={[styles.intelText, { color: theme.muted }]}>Your experience helps other students scout what lies ahead. Ratings are subjective planning signals; curriculum and prerequisite rules always take priority.</Text></View>
+      </View>
 
       <View style={[styles.departmentTabs, { backgroundColor: theme.surface, borderColor: theme.border }]}> 
         {courseFilters.map((item) => {
@@ -226,6 +231,12 @@ const styles = StyleSheet.create({
   infoTitle: { fontSize: 13, fontWeight: '900' },
   infoText: { marginTop: 5, fontSize: 11, lineHeight: 16 },
   infoStrong: { fontWeight: '900' },
+  intelPrompt: { marginTop: 10, padding: 13, borderRadius: 14, borderWidth: 1, flexDirection: 'row', alignItems: 'center', gap: 12 },
+  intelStars: { flexDirection: 'row', gap: 2 },
+  intelStar: { fontSize: 14, fontWeight: '900' },
+  intelCopy: { flex: 1 },
+  intelTitle: { fontSize: 11, fontWeight: '900' },
+  intelText: { marginTop: 3, fontSize: 9.5, lineHeight: 14 },
   departmentTabs: { marginTop: 16, maxWidth: 560, padding: 4, borderRadius: 14, borderWidth: 1, flexDirection: 'row' },
   departmentTab: { flex: 1, minHeight: 42, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   departmentText: { fontSize: 11, fontWeight: '900' },

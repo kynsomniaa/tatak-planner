@@ -39,14 +39,9 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: App
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.page}
       >
-        <View style={styles.brandMark}>
-          <Text style={styles.brandLetters}>CP</Text>
-        </View>
-        <Text style={styles.eyebrow}>FEU TECH STUDENT PLANNER</Text>
-        <Text style={styles.title}>Build the route to your degree.</Text>
-        <Text style={styles.subtitle}>
-          Choose your FEU Tech program, map your progress, and keep every prerequisite chain valid.
-        </Text>
+        <Text style={styles.wordmark}>TAM // CORE</Text>
+        <Text style={styles.title}>Map your degree.{`\n`}Plan your next move.</Text>
+        <Text style={styles.subtitle}>Navigate prerequisites, plan future terms, and track your path through FEU Tech.</Text>
 
         <View style={styles.card}>
           <Text style={styles.cardTitle}>{creating ? 'Create your account' : 'Welcome back'}</Text>
@@ -96,6 +91,7 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: App
             ? 'Your public identity is only your username. Operational service logs may still exist.'
             : 'Preview accounts stay in this browser or device until Supabase is connected.'}
         </Text>
+        <Text style={styles.attribution}>Unofficial student-made project · Created by Miguel Amante De Guzman</Text>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
@@ -104,17 +100,7 @@ export function AuthScreen({ onAuthenticated }: { onAuthenticated: (session: App
 const styles = StyleSheet.create({
   safe: { flex: 1, backgroundColor: colors.green900 },
   page: { flex: 1, paddingHorizontal: 24, paddingTop: 36, justifyContent: 'center' },
-  brandMark: {
-    width: 52,
-    height: 52,
-    borderRadius: 16,
-    backgroundColor: colors.gold,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 18,
-  },
-  brandLetters: { color: colors.green900, fontWeight: '900', fontSize: 19 },
-  eyebrow: { color: '#A8D5BF', fontSize: 12, fontWeight: '900', letterSpacing: 1.3 },
+  wordmark: { color: colors.gold, fontSize: 16, fontWeight: '900', letterSpacing: 2.1 },
   title: { marginTop: 8, color: '#FFFFFF', fontSize: 34, lineHeight: 39, fontWeight: '900' },
   subtitle: { marginTop: 10, color: '#C8DDD3', fontSize: 15, lineHeight: 22 },
   card: { marginTop: 26, padding: 20, borderRadius: 22, backgroundColor: colors.surface },
@@ -134,4 +120,5 @@ const styles = StyleSheet.create({
   submit: { marginTop: 18 },
   switch: { marginTop: 9 },
   disclaimer: { color: '#9FC1B1', textAlign: 'center', fontSize: 11, marginTop: 18, lineHeight: 16 },
+  attribution: { color: '#739888', textAlign: 'center', fontSize: 9, marginTop: 10, lineHeight: 14 },
 });
